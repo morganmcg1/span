@@ -605,19 +605,18 @@ If you access from multiple locations (home, travel, mobile via Telegram browser
 
 ### Deploying Updates
 
-GitHub PAT is stored in `~/.git-credentials` on the server. To deploy updates:
-
 ```bash
-# From local machine - push changes, then deploy
-git push
-
-# SSH in and pull + restart
-ssh root@135.181.102.44 "cd /root/span && git pull && pkill -f 'span.telegram' || true"
-ssh root@135.181.102.44 "cd /root/span && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
-
-# Or as a one-liner
-ssh root@135.181.102.44 "cd /root/span && git pull && (pkill -f 'span.telegram' || true) && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
+# One command to deploy everything
+./deploy.sh
 ```
+
+This script:
+1. Pushes local changes to GitHub
+2. Pulls on server + installs new deps
+3. Restarts the Telegram bot
+4. Shows recent logs
+
+GitHub PAT is stored in `~/.git-credentials` on the server (already configured).
 
 ### Checking Logs
 
