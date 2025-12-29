@@ -16,11 +16,12 @@ ssh $SERVER "cd $REMOTE_DIR && git pull && /root/.local/bin/uv sync"
 
 # 3. Restart Telegram bot
 echo "🤖 Restarting Telegram bot..."
-ssh $SERVER "pkill -f 'span.telegram' || true"
+ssh $SERVER "killall python3 2>/dev/null || true"
+sleep 1
 ssh $SERVER "cd $REMOTE_DIR && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
 
 # 4. Check it's running
-sleep 2
+sleep 3
 ssh $SERVER "pgrep -f 'span.telegram' > /dev/null && echo '✅ Telegram bot running' || echo '❌ Telegram bot failed to start'"
 
 echo ""
