@@ -25,6 +25,9 @@ db: Database | None = None
 # Default user ID used when no user is found in database
 DEFAULT_USER_ID = 1
 
+# Persistent room name - reused to avoid iOS permission prompts on each new URL
+PERSISTENT_ROOM_NAME = "span-voice-room"
+
 
 def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None]:
     """Get user ID and lesson plan, falling back to default user if needed.
@@ -220,37 +223,57 @@ async def trigger_dialout():
         return {"error": str(e)}
 
 
+async def _get_or_create_persistent_room(session: aiohttp.ClientSession) -> tuple[str, str]:
+    """Get existing persistent room or create it if it doesn't exist.
+
+    Returns (room_url, room_name).
+    """
+    headers = {
+        "Authorization": f"Bearer {config.daily_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Try to get existing room
+    async with session.get(
+        f"https://api.daily.co/v1/rooms/{PERSISTENT_ROOM_NAME}",
+        headers=headers,
+    ) as resp:
+        if resp.status == 200:
+            room_data = await resp.json()
+            return room_data["url"], room_data["name"]
+
+    # Room doesn't exist, create it (no exp = never expires)
+    async with session.post(
+        "https://api.daily.co/v1/rooms",
+        headers=headers,
+        json={
+            "name": PERSISTENT_ROOM_NAME,
+            "properties": {
+                "enable_prejoin_ui": False,
+            }
+        },
+    ) as resp:
+        if resp.status != 200:
+            error = await resp.text()
+            raise Exception(f"Failed to create room: {error}")
+        room_data = await resp.json()
+        return room_data["url"], room_data["name"]
+
+
 @app.api_route("/web", methods=["GET", "POST"])
 async def start_web_session():
     """Start a browser-based voice session.
 
     Returns room URL - open it in your browser to talk to the bot.
+    Uses a persistent room to avoid iOS permission prompts on each new URL.
     """
     if not config.daily_api_key:
         return {"error": "DAILY_API_KEY not configured"}
 
     try:
         async with aiohttp.ClientSession() as session:
-            # Create room
-            async with session.post(
-                "https://api.daily.co/v1/rooms",
-                headers={
-                    "Authorization": f"Bearer {config.daily_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "properties": {
-                        "exp": int(time.time()) + 3600,
-                        "enable_prejoin_ui": False,
-                    }
-                },
-            ) as resp:
-                if resp.status != 200:
-                    error = await resp.text()
-                    return {"error": f"Failed to create room: {error}"}
-                room_data = await resp.json()
-                room_url = room_data["url"]
-                room_name = room_data["name"]
+            # Get or create persistent room
+            room_url, room_name = await _get_or_create_persistent_room(session)
 
             # Get meeting token for bot
             async with session.post(
