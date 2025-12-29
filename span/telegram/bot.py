@@ -52,8 +52,7 @@ class SpanTelegramBot:
                     InlineKeyboardButton(text="📚 Review", callback_data="cmd_review"),
                 ],
                 [
-                    InlineKeyboardButton(text="🚀 ¡Vamos!", callback_data="cmd_v"),
-                    InlineKeyboardButton(text="🎤 Voice chat", callback_data="cmd_chat"),
+                    InlineKeyboardButton(text="🎤 Voice chat", callback_data="cmd_v"),
                 ],
                 [
                     InlineKeyboardButton(text="📖 Vocab", callback_data="cmd_vocab"),
@@ -134,24 +133,47 @@ class SpanTelegramBot:
 
         @self.dp.message(Command("v"))
         async def v_handler(message: Message) -> None:
-            """Start a practice conversation."""
-            user = self._ensure_user(message.from_user.id)
-            if not user:
-                await message.answer("Error: Could not find your user profile.")
-                return
+            """Start a voice chat session via browser."""
+            _user = self._ensure_user(message.from_user.id)
 
-            plan = self.scheduler.create_daily_plan(user.id)
-            vocab = [item.spanish for item in (plan.review_items + plan.new_items)[:5]]
+            await message.answer("🎤 Starting voice room... one moment!")
 
-            starter = self.llm.generate_conversation_prompt(
-                topic=plan.suggested_topic,
-                vocabulary=vocab,
-            )
+            # Call the voice server to create a room
+            voice_server_url = f"http://localhost:{self.config.voice_server_port}/web"
 
-            await message.answer(
-                f"Let's practice! Topic: *{plan.suggested_topic}*\n\n{starter}",
-                parse_mode="Markdown",
-            )
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(voice_server_url) as resp:
+                        if resp.status != 200:
+                            await message.answer(
+                                "Could not start voice room. Is the voice server running?\n"
+                                f"Start it with: `uv run python -m span.voice`",
+                                parse_mode="Markdown",
+                            )
+                            return
+
+                        data = await resp.json()
+
+                        if "error" in data:
+                            await message.answer(f"Error: {data['error']}")
+                            return
+
+                        room_url = data.get("room_url")
+                        if room_url:
+                            await message.answer(
+                                f"🎤 Voice room ready!\n\n"
+                                f"Open this link in your browser and allow mic access:\n"
+                                f"{room_url}",
+                            )
+                        else:
+                            await message.answer("Error: No room URL returned")
+
+            except aiohttp.ClientConnectorError:
+                await message.answer(
+                    "Could not connect to voice server.\n"
+                    "Start it with: `uv run python -m span.voice`",
+                    parse_mode="Markdown",
+                )
 
         @self.dp.message(Command("stats"))
         async def stats_handler(message: Message) -> None:
@@ -235,50 +257,6 @@ class SpanTelegramBot:
 
             await message.answer(text, parse_mode="Markdown")
 
-        @self.dp.message(Command("chat"))
-        async def chat_handler(message: Message) -> None:
-            """Start a voice chat session via browser."""
-            _user = self._ensure_user(message.from_user.id)
-
-            await message.answer("Starting voice room... one moment!")
-
-            # Call the voice server to create a room
-            voice_server_url = f"http://localhost:{self.config.voice_server_port}/web"
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(voice_server_url) as resp:
-                        if resp.status != 200:
-                            await message.answer(
-                                "Could not start voice room. Is the voice server running?\n"
-                                f"Start it with: `uv run python -m span.voice`",
-                                parse_mode="Markdown",
-                            )
-                            return
-
-                        data = await resp.json()
-
-                        if "error" in data:
-                            await message.answer(f"Error: {data['error']}")
-                            return
-
-                        room_url = data.get("room_url")
-                        if room_url:
-                            await message.answer(
-                                f"Voice room ready!\n\n"
-                                f"Open this link in your browser and allow mic access:\n"
-                                f"{room_url}",
-                            )
-                        else:
-                            await message.answer("Error: No room URL returned")
-
-            except aiohttp.ClientConnectorError:
-                await message.answer(
-                    "Could not connect to voice server.\n"
-                    "Start it with: `uv run python -m span.voice`",
-                    parse_mode="Markdown",
-                )
-
         # Button callback handlers for menu commands
         @self.dp.callback_query(F.data.startswith("cmd_"))
         async def menu_button_callback(callback: CallbackQuery) -> None:
@@ -290,7 +268,6 @@ class SpanTelegramBot:
                 "new": new_handler,
                 "review": review_handler,
                 "v": v_handler,
-                "chat": chat_handler,
                 "vocab": vocab_handler,
                 "stats": stats_handler,
             }
