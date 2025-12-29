@@ -52,7 +52,7 @@ class SpanTelegramBot:
                     InlineKeyboardButton(text="📚 Review", callback_data="cmd_review"),
                 ],
                 [
-                    InlineKeyboardButton(text="🚀 ¡Vamos!", callback_data="cmd_vamos"),
+                    InlineKeyboardButton(text="🚀 ¡Vamos!", callback_data="cmd_v"),
                     InlineKeyboardButton(text="🎤 Voice chat", callback_data="cmd_chat"),
                 ],
                 [
@@ -132,8 +132,8 @@ class SpanTelegramBot:
                 "Try using these in a sentence! Just reply with your practice."
             )
 
-        @self.dp.message(Command("vamos"))
-        async def vamos_handler(message: Message) -> None:
+        @self.dp.message(Command("v"))
+        async def v_handler(message: Message) -> None:
             """Start a practice conversation."""
             user = self._ensure_user(message.from_user.id)
             if not user:
@@ -258,7 +258,7 @@ class SpanTelegramBot:
             handlers = {
                 "new": new_handler,
                 "review": review_handler,
-                "vamos": vamos_handler,
+                "v": v_handler,
                 "chat": chat_handler,
                 "vocab": vocab_handler,
                 "stats": stats_handler,
