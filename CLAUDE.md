@@ -617,9 +617,13 @@ This script:
 4. Verifies bot is running
 5. Shows recent logs and helpful commands
 
-**Note for AI assistants:** When backgrounding processes over SSH, you MUST close stdin with `</dev/null` or SSH will hang waiting for file descriptors to close. The pattern is:
+**Note for AI assistants:** Backgrounding processes over SSH is tricky. The deploy script uses:
+1. A helper script on the server (`/root/span/start-bot.sh`) that handles nohup/backgrounding
+2. `ssh -f` to fork SSH to background immediately
+
+If you need to manually restart:
 ```bash
-ssh server "nohup command > log.log 2>&1 </dev/null &"
+ssh -f root@135.181.102.44 "/root/span/start-bot.sh"
 ```
 
 GitHub PAT is embedded in the git remote URL on the server (already configured).
