@@ -193,6 +193,12 @@ TELEGRAM_USER_ID=your_numeric_user_id  # Get from @userinfobot
 OPENAI_API_KEY=your_openai_key  # Required for voice notes
 ```
 
+### Daily Reminder
+The bot sends a daily voice practice reminder at **9:55am** (in the configured timezone, default: Europe/Dublin). The reminder includes a pre-created voice room link if the voice server is running.
+
+### Voice Randomization
+Each voice session (both voice calls and Telegram voice notes) uses a **randomly selected voice** from the full OpenAI Realtime API voice set: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar.
+
 ### Commands
 | Command | Purpose |
 |---------|---------|

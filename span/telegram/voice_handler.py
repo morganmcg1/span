@@ -4,6 +4,7 @@ import asyncio
 import base64
 import io
 import json
+import random
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,13 @@ from rich.console import Console
 from span.db.models import ConversationMessage
 
 console = Console()
+
+# OpenAI Realtime API voices - randomized each session for variety
+# Full list as of 2025: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar
+OPENAI_REALTIME_VOICES = [
+    "alloy", "ash", "ballad", "coral", "echo", "fable",
+    "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar",
+]
 
 
 @dataclass
@@ -30,10 +38,11 @@ class RealtimeVoiceClient:
 
     WS_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime-2025-08-28"
 
-    def __init__(self, api_key: str, system_prompt: str, voice: str = "shimmer"):
+    def __init__(self, api_key: str, system_prompt: str, voice: str | None = None):
         self.api_key = api_key
         self.system_prompt = system_prompt
-        self.voice = voice
+        # Randomize voice each session for variety
+        self.voice = voice or random.choice(OPENAI_REALTIME_VOICES)
 
     async def process_voice_note(
         self,

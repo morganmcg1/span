@@ -1,5 +1,7 @@
 """PipeCat voice bot for Spanish conversation practice using OpenAI Realtime."""
 
+import random
+
 from pipecat.frames.frames import TranscriptionFrame, TTSTextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -19,6 +21,13 @@ from span.db.database import Database
 from span.llm.prompts import VOICE_TUTOR_SYSTEM_PROMPT
 from span.memory.extractor import MemoryExtractor
 from span.voice.tools import CURRICULUM_TOOLS, register_tools
+
+# OpenAI Realtime API voices - randomized each session for variety
+# Full list as of 2025: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar
+OPENAI_REALTIME_VOICES = [
+    "alloy", "ash", "ballad", "coral", "echo", "fable",
+    "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar",
+]
 
 
 class ConversationLogger(FrameProcessor):
@@ -145,10 +154,14 @@ Use skill_observations parameter to report specific skill demonstrations you obs
         """Create the OpenAI Realtime service for speech-to-speech conversation."""
         system_prompt = self.build_system_prompt()
 
+        # Randomize voice each session for variety
+        voice = random.choice(OPENAI_REALTIME_VOICES)
+
         session_properties = SessionProperties(
             input_audio_transcription=InputAudioTranscription(model="whisper-1"),
             turn_detection=TurnDetection(type="server_vad"),
             instructions=system_prompt,
+            voice=voice,
         )
 
         self._llm = OpenAIRealtimeLLMService(
