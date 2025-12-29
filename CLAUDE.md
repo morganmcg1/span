@@ -80,6 +80,9 @@ Prefer adding autoreload at the top cell of the notebook so that we don't have t
 %autoreload 2
 ```
 
+## Running commands
+Avoid asking the user to run commands unless its strictly necesary for the user to run it. Its fine to educate them and tell them the commands that are being run and why, but if you've been asked to achieve a task and there isn't a strong reason why you can't just run the command yourself, just run the command.
+
 ## AI system design
 - Use OpenAI gpt-realtime for voice calls (handles STT + LLM + TTS natively via PipeCat/Daily)
 - Use OpenAI gpt-realtime for Telegram voice notes (via WebSocket, single-turn audio exchange)
@@ -599,3 +602,42 @@ sudo systemctl enable fail2ban
 ### Why Not Restrict SSH by IP?
 
 If you access from multiple locations (home, travel, mobile via Telegram browser, VPN), IP whitelisting is impractical. Key-only auth + fail2ban provides equivalent security without the hassle.
+
+### Deploying Updates
+
+GitHub PAT is stored in `~/.git-credentials` on the server. To deploy updates:
+
+```bash
+# From local machine - push changes, then deploy
+git push
+
+# SSH in and pull + restart
+ssh root@135.181.102.44 "cd /root/span && git pull && pkill -f 'span.telegram' || true"
+ssh root@135.181.102.44 "cd /root/span && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
+
+# Or as a one-liner
+ssh root@135.181.102.44 "cd /root/span && git pull && (pkill -f 'span.telegram' || true) && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
+```
+
+### Checking Logs
+
+```bash
+# View Telegram bot logs
+ssh root@135.181.102.44 "tail -50 /root/span/telegram.log"
+
+# Follow logs live
+ssh root@135.181.102.44 "tail -f /root/span/telegram.log"
+```
+
+### Starting/Stopping Services
+
+```bash
+# Stop Telegram bot
+ssh root@135.181.102.44 "pkill -f 'span.telegram'"
+
+# Start Telegram bot
+ssh root@135.181.102.44 "cd /root/span && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
+
+# Check if running
+ssh root@135.181.102.44 "pgrep -f 'span.telegram' && echo 'Running' || echo 'Not running'"
+```
