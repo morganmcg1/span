@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before stopping, carefully consider: Is the task truly complete? Review what was requested and what was done. Are there any loose ends, untested changes, or follow-up steps that should be addressed? If there is more meaningful work to be done, block the stop and continue. Only allow stopping if the task is genuinely finished.",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -194,7 +194,7 @@ OPENAI_API_KEY=your_openai_key  # Required for voice notes
 ```
 
 ### Daily Reminder
-The bot sends a daily voice practice reminder at **9:55am** (in the configured timezone, default: Europe/Dublin). The reminder includes a pre-created voice room link if the voice server is running.
+The bot sends a daily voice practice reminder at a **random time between 9:30-10:30am** Dublin time (Europe/Dublin timezone). Each day the time varies to feel more natural. The reminder includes a pre-created voice room link if the voice server is running.
 
 ### Voice Randomization
 Each voice session (both voice calls and Telegram voice notes) uses a **randomly selected voice** from the full OpenAI Realtime API voice set: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar.
@@ -633,6 +633,27 @@ ssh -f root@135.181.102.44 "/root/span/start-bot.sh"
 ```
 
 GitHub PAT is embedded in the git remote URL on the server (already configured).
+
+### Health Check
+
+Run the health check script to verify all services are running:
+
+```bash
+# From your local machine (runs script on server)
+ssh root@135.181.102.44 "/root/span/scripts/health-check.sh"
+
+# Or if already SSH'd into the server
+/root/span/scripts/health-check.sh
+```
+
+The health check shows:
+- Telegram bot status (running/not running)
+- Voice server status (running/not running)
+- Voice health endpoint response
+- Recent logs from both services
+- Error count in logs
+
+**For Claude Code**: When asked to check server health, run `ssh root@135.181.102.44 "/root/span/scripts/health-check.sh"`.
 
 ### Checking Logs
 
