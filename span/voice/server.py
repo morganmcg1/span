@@ -1,5 +1,6 @@
 """FastAPI server for Daily PSTN voice calls."""
 
+import asyncio
 import aiohttp
 import time
 from contextlib import asynccontextmanager
@@ -27,6 +28,9 @@ DEFAULT_USER_ID = 1
 
 # Persistent room name - reused to avoid iOS permission prompts on each new URL
 PERSISTENT_ROOM_NAME = "span-voice-room"
+
+# Track active bot tasks per room to prevent duplicates
+_active_bot_tasks: dict[str, asyncio.Task] = {}
 
 
 def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None]:
@@ -267,6 +271,8 @@ async def start_web_session():
     Returns room URL - open it in your browser to talk to the bot.
     Uses a persistent room to avoid iOS permission prompts on each new URL.
     """
+    global _active_bot_tasks
+
     if not config.daily_api_key:
         return {"error": "DAILY_API_KEY not configured"}
 
@@ -274,6 +280,17 @@ async def start_web_session():
         async with aiohttp.ClientSession() as session:
             # Get or create persistent room
             room_url, room_name = await _get_or_create_persistent_room(session)
+
+            # Check if there's already an active bot task for this room
+            existing_task = _active_bot_tasks.get(room_name)
+            if existing_task is not None and not existing_task.done():
+                console.print(f"[yellow]Bot already active for room {room_name}, returning existing URL[/yellow]")
+                return {
+                    "status": "ready",
+                    "room_url": room_url,
+                    "instructions": "Open the room URL in your browser to start talking",
+                    "note": "Bot already active in room",
+                }
 
             # Get meeting token for bot
             async with session.post(
@@ -303,8 +320,6 @@ async def start_web_session():
         transport = bot.create_transport(room_url, token)
 
         # Run bot in background
-        import asyncio
-
         async def run_bot():
             try:
                 pipeline = await bot.create_pipeline(transport)
@@ -316,8 +331,12 @@ async def start_web_session():
                 console.print(f"[red]Bot error: {e}[/red]")
             finally:
                 console.print("[blue]Session ended[/blue]")
+                # Clean up task reference when done
+                _active_bot_tasks.pop(room_name, None)
 
-        asyncio.create_task(run_bot())
+        # Create and track the bot task
+        bot_task = asyncio.create_task(run_bot())
+        _active_bot_tasks[room_name] = bot_task
 
         console.print(f"[green]Room created: {room_url}[/green]")
         return {
