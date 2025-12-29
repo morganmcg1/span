@@ -349,6 +349,27 @@ class SpanTelegramBot:
                 await message.answer("Error: Could not find your user profile.")
                 return
 
+            # Quick translation mode: "t " or "T " prefix
+            if message.text.startswith(("t ", "T ")) and len(message.text) > 2:
+                text_to_translate = message.text[2:]
+                try:
+                    translation = self.llm.chat(
+                        messages=[LLMMessage(role="user", content=text_to_translate)],
+                        system=(
+                            "You are a translator. Translate the user's English text to natural Mexican Spanish. "
+                            "Output ONLY the translation, no explanations, no quotes, no preamble. "
+                            "Use standard Mexican Spanish - not overly formal, not slang. "
+                            "Just everyday spoken Mexican Spanish."
+                        ),
+                        max_tokens=200,
+                    )
+                    await message.answer(translation)
+                    return
+                except Exception as e:
+                    console.print(f"[red]Translation error: {e}[/red]")
+                    await message.answer(self._format_error(e, "text"))
+                    return
+
             try:
                 # Get learner profile for personalized context
                 profile = self.db.get_or_create_learner_profile(user.id)
