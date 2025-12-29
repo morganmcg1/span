@@ -639,10 +639,10 @@ GitHub PAT is embedded in the git remote URL on the server (already configured).
 Run the health check script to verify all services are running:
 
 ```bash
-# From your local machine (runs script on server)
-ssh root@135.181.102.44 "/root/span/scripts/health-check.sh"
+# From local machine (auto-SSHs to server)
+./scripts/health-check.sh --remote
 
-# Or if already SSH'd into the server
+# Already on the server (no SSH needed)
 /root/span/scripts/health-check.sh
 ```
 
@@ -653,7 +653,7 @@ The health check shows:
 - Recent logs from both services
 - Error count in logs
 
-**For Claude Code**: When asked to check server health, run `ssh root@135.181.102.44 "/root/span/scripts/health-check.sh"`.
+**For Claude Code**: When asked to check server health, run `./scripts/health-check.sh --remote`.
 
 ### Checking Logs
 

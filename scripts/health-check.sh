@@ -1,8 +1,19 @@
 #!/bin/bash
 # Health check script for span services
-# Run this on the server to check service status
+#
+# Usage:
+#   On the server directly:  ./scripts/health-check.sh
+#   From local machine:      ./scripts/health-check.sh --remote
+#
+# No SSH key needed when running directly on the server.
 
 set -e
+
+# If --remote flag, SSH into server and run this script there
+if [ "$1" = "--remote" ] || [ "$1" = "-r" ]; then
+    SERVER_IP="${SPAN_SERVER_IP:-135.181.102.44}"
+    exec ssh "root@$SERVER_IP" "/root/span/scripts/health-check.sh"
+fi
 
 echo "========================================="
 echo "  Span Health Check - $(date)"
