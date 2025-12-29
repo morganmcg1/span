@@ -612,11 +612,14 @@ If you access from multiple locations (home, travel, mobile via Telegram browser
 
 This script:
 1. Pushes local changes to GitHub
-2. Pulls on server + installs new deps
-3. Restarts the Telegram bot
-4. Shows recent logs
+2. Pulls on server + installs new deps (`uv sync`)
+3. Kills existing bot, starts new one with `nohup` + `disown`
+4. Verifies bot is running
+5. Shows recent logs and helpful commands
 
-GitHub PAT is stored in `~/.git-credentials` on the server (already configured).
+**Note for AI assistants:** The deploy script uses `bash -c '... & disown'` to properly background the process and release the SSH session. Don't use bare `nohup ... &` over SSH as it can hang.
+
+GitHub PAT is embedded in the git remote URL on the server (already configured).
 
 ### Checking Logs
 
