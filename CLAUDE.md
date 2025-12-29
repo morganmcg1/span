@@ -535,3 +535,67 @@ JOIN curriculum_items ci ON up.item_id = ci.id
 WHERE up.user_id = 1
 ORDER BY up.next_review LIMIT 10"
 ```
+
+---
+
+## Deployment (Hetzner)
+
+### Server Access
+
+The production server IP is stored in `.env` as `SPAN_SERVER_IP`.
+
+```bash
+# SSH into the server
+ssh root@$(grep SPAN_SERVER_IP .env | cut -d'=' -f2)
+
+# Or manually
+ssh root@135.181.102.44
+```
+
+Server name: `span-server-ubuntu-4gb-hel1-3`
+
+### Server Setup
+
+Create a Hetzner Cloud server with:
+- Ubuntu 22.04 or 24.04
+- Add your SSH public key (`~/.ssh/id_rsa.pub` or `~/.ssh/id_ed25519.pub`)
+- Skip cloud-init (configure manually)
+
+### Firewall Rules (Inbound)
+
+Configure in Hetzner Cloud Console > Firewalls:
+
+| Source | Protocol | Port | Purpose |
+|--------|----------|------|---------|
+| Any IPv4/IPv6 | ICMP | - | Ping |
+| Any IPv4/IPv6 | TCP | 80 | HTTP |
+| Any IPv4/IPv6 | TCP | 443 | HTTPS |
+| Any IPv4/IPv6 | TCP | 22 | SSH (harden below) |
+
+**Outbound:** Leave as "all allowed" - the app needs to reach OpenAI, Anthropic, Telegram, and Daily APIs.
+
+### SSH Hardening (Required)
+
+After first SSH login, run these commands:
+
+```bash
+# 1. Disable password auth (key-only)
+sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+# 2. Disable root login
+sudo sed -i 's/PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+
+# 3. Restart SSH (Ubuntu uses 'ssh' not 'sshd')
+sudo systemctl restart ssh
+
+# 4. Install fail2ban (auto-bans IPs after failed attempts)
+sudo apt update && sudo apt install -y fail2ban
+sudo systemctl enable fail2ban
+```
+
+**Important:** Ensure you can SSH with your key before running step 3. Don't lock yourself out.
+
+### Why Not Restrict SSH by IP?
+
+If you access from multiple locations (home, travel, mobile via Telegram browser, VPN), IP whitelisting is impractical. Key-only auth + fail2ban provides equivalent security without the hassle.
