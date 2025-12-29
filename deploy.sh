@@ -14,12 +14,9 @@ git push
 echo "📥 Pulling on server..."
 ssh $SERVER "cd $REMOTE_DIR && git pull && /root/.local/bin/uv sync"
 
-# 3. Restart Telegram bot
-# Note: Must close all file descriptors (</dev/null >/dev/null 2>&1) for SSH to return
+# 3. Restart Telegram bot using ssh -f (fork to background)
 echo "🤖 Restarting Telegram bot..."
-ssh $SERVER "killall python3 2>/dev/null || true"
-sleep 1
-ssh $SERVER "cd $REMOTE_DIR && nohup /root/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 </dev/null &"
+ssh -f $SERVER "$REMOTE_DIR/start-bot.sh"
 
 # 4. Check it's running (give it time to start)
 echo "⏳ Waiting for bot to start..."
