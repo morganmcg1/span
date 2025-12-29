@@ -617,7 +617,10 @@ This script:
 4. Verifies bot is running
 5. Shows recent logs and helpful commands
 
-**Note for AI assistants:** The deploy script uses `bash -c '... & disown'` to properly background the process and release the SSH session. Don't use bare `nohup ... &` over SSH as it can hang.
+**Note for AI assistants:** When backgrounding processes over SSH, you MUST close stdin with `</dev/null` or SSH will hang waiting for file descriptors to close. The pattern is:
+```bash
+ssh server "nohup command > log.log 2>&1 </dev/null &"
+```
 
 GitHub PAT is embedded in the git remote URL on the server (already configured).
 
