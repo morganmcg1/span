@@ -178,6 +178,37 @@ class SpanTelegramBot:
                 parse_mode="Markdown",
             )
 
+        @self.dp.message(Command("health"))
+        async def health_handler(message: Message) -> None:
+            """Check health of all services."""
+            status_lines = ["🏥 *Service Health Check*\n"]
+
+            # Check Telegram bot (we're running if we got here)
+            status_lines.append("✅ Telegram bot: running")
+
+            # Check voice server
+            voice_server_url = f"http://localhost:{self.config.voice_server_port}/health"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(voice_server_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        if resp.status == 200:
+                            status_lines.append("✅ Voice server: running")
+                        else:
+                            status_lines.append(f"⚠️ Voice server: status {resp.status}")
+            except Exception:
+                status_lines.append("❌ Voice server: not responding")
+                status_lines.append(f"   Start with: `uv run python -m span.voice`")
+
+            # Database check
+            try:
+                user_count = len(self.db.get_all_users())
+                item_count = len(self.db.get_all_curriculum_items())
+                status_lines.append(f"✅ Database: {user_count} users, {item_count} items")
+            except Exception as e:
+                status_lines.append(f"❌ Database: {e}")
+
+            await message.answer("\n".join(status_lines), parse_mode="Markdown")
+
         @self.dp.message(Command("vocab"))
         async def vocab_handler(message: Message) -> None:
             """Show vocabulary list for quick reference."""
