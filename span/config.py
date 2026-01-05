@@ -39,6 +39,7 @@ class Config:
     # Server
     voice_server_host: str = "0.0.0.0"
     voice_server_port: int = 7860
+    voice_server_public_url: str = ""  # e.g., http://135.181.102.44:7860 for production
 
     # Database
     database_path: str = "data/span.db"
@@ -73,6 +74,7 @@ class Config:
             telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
             voice_server_host=os.environ.get("VOICE_SERVER_HOST", "0.0.0.0"),
             voice_server_port=cls._safe_int(os.environ.get("VOICE_SERVER_PORT", "7860"), 7860),
+            voice_server_public_url=os.environ.get("VOICE_SERVER_PUBLIC_URL", ""),
             database_path=os.environ.get("DATABASE_PATH", "data/span.db"),
             timezone=os.environ.get("TIMEZONE", "Europe/Dublin"),
         )

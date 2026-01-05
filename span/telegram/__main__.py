@@ -91,12 +91,14 @@ async def send_daily_voice_reminder(
                 else:
                     data = await resp.json()
                     room_url = data.get("room_url")
+                    # Prefer start_url (landing page for iOS mic permissions)
+                    voice_url = data.get("start_url") or room_url
 
-                    if room_url:
+                    if voice_url:
                         await bot.send_message(
                             "🌅 *¡Buenos días!* Time for your daily Spanish practice!\n\n"
-                            f"🎤 Voice room ready:\n{room_url}\n\n"
-                            "Open the link, allow mic access, and let's practice!"
+                            f"🎤 Voice room ready:\n{voice_url}\n\n"
+                            "Tap the link and press 'Start Voice Call'!"
                         )
                         console.print(f"[green]Sent daily voice reminder with room: {room_url}[/green]")
                     else:

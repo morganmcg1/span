@@ -159,11 +159,13 @@ class SpanTelegramBot:
                             return
 
                         room_url = data.get("room_url")
-                        if room_url:
+                        # Prefer start_url (landing page for iOS mic permissions)
+                        voice_url = data.get("start_url") or room_url
+                        if voice_url:
                             await message.answer(
                                 f"🎤 Voice room ready!\n\n"
-                                f"Open this link in your browser and allow mic access:\n"
-                                f"{room_url}",
+                                f"Tap the link and press 'Start Voice Call':\n"
+                                f"{voice_url}",
                             )
                         else:
                             await message.answer("Error: No room URL returned")

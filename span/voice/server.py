@@ -4,8 +4,10 @@ import asyncio
 import aiohttp
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.transports.daily.transport import DailyDialinSettings
@@ -31,6 +33,113 @@ PERSISTENT_ROOM_NAME = "span-voice-room"
 
 # Track active bot tasks per room to prevent duplicates
 _active_bot_tasks: dict[str, asyncio.Task] = {}
+
+# Landing page HTML for iOS mic permission handling
+LANDING_PAGE_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Span Voice Call</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 40px 20px;
+            text-align: center;
+            background: #F2F2F7;
+            min-height: 100vh;
+            margin: 0;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            padding: 32px 24px;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 { margin: 0 0 8px 0; font-size: 28px; }
+        .subtitle { color: #666; margin-bottom: 32px; }
+        .btn {
+            background: #007AFF;
+            color: white;
+            padding: 16px 32px;
+            border: none;
+            border-radius: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.2s;
+        }
+        .btn:active { background: #0056CC; }
+        .btn:disabled { background: #999; }
+        .error { color: #FF3B30; margin-top: 20px; }
+        .success { color: #34C759; margin-top: 20px; }
+        .instructions {
+            margin-top: 20px;
+            text-align: left;
+            padding: 16px;
+            background: #FFF3CD;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+        .instructions ol { margin: 8px 0 0 0; padding-left: 20px; }
+        .instructions li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Voice Practice</h1>
+        <p class="subtitle">Tap below to start your Spanish session</p>
+        <button class="btn" id="startBtn" onclick="startCall()">Start Voice Call</button>
+        <div id="status"></div>
+    </div>
+    <script>
+        const roomUrl = new URLSearchParams(location.search).get('room');
+
+        async function startCall() {
+            const status = document.getElementById('status');
+            const btn = document.getElementById('startBtn');
+
+            btn.disabled = true;
+            btn.textContent = 'Requesting microphone...';
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+                // Stop the stream immediately - we just needed permission
+                stream.getTracks().forEach(track => track.stop());
+
+                status.innerHTML = '<p class="success">Microphone enabled! Joining call...</p>';
+                window.location.href = roomUrl;
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Try Again';
+
+                let errorMsg = 'Microphone access denied';
+                if (err.name === 'NotAllowedError') {
+                    errorMsg = 'Microphone permission denied';
+                } else if (err.name === 'NotFoundError') {
+                    errorMsg = 'No microphone found';
+                }
+
+                status.innerHTML = `
+                    <p class="error">${errorMsg}</p>
+                    <div class="instructions">
+                        <strong>To fix on iOS:</strong>
+                        <ol>
+                            <li>Open <strong>Settings</strong></li>
+                            <li>Go to <strong>Privacy & Security > Microphone</strong></li>
+                            <li>Enable microphone for your browser app</li>
+                            <li>Return here and tap "Try Again"</li>
+                        </ol>
+                    </div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
 
 def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None]:
@@ -264,6 +373,24 @@ async def _get_or_create_persistent_room(session: aiohttp.ClientSession) -> tupl
         return room_data["url"], room_data["name"]
 
 
+def _build_start_url(room_url: str) -> str | None:
+    """Build the voice-start landing page URL if public URL is configured."""
+    if not config.voice_server_public_url:
+        return None
+    return f"{config.voice_server_public_url}/voice-start?{urlencode({'room': room_url})}"
+
+
+@app.get("/voice-start")
+async def voice_start_page(room: str):
+    """Landing page that requests mic permission before redirecting to Daily room.
+
+    This helps iOS devices that have cached a "denied" permission state.
+    The page explicitly calls getUserMedia() which gives iOS a fresh chance
+    to show the permission modal.
+    """
+    return HTMLResponse(content=LANDING_PAGE_HTML)
+
+
 @app.api_route("/web", methods=["GET", "POST"])
 async def start_web_session():
     """Start a browser-based voice session.
@@ -285,12 +412,16 @@ async def start_web_session():
             existing_task = _active_bot_tasks.get(room_name)
             if existing_task is not None and not existing_task.done():
                 console.print(f"[yellow]Bot already active for room {room_name}, returning existing URL[/yellow]")
-                return {
+                response = {
                     "status": "ready",
                     "room_url": room_url,
                     "instructions": "Open the room URL in your browser to start talking",
                     "note": "Bot already active in room",
                 }
+                start_url = _build_start_url(room_url)
+                if start_url:
+                    response["start_url"] = start_url
+                return response
 
             # Get meeting token for bot
             async with session.post(
@@ -339,11 +470,15 @@ async def start_web_session():
         _active_bot_tasks[room_name] = bot_task
 
         console.print(f"[green]Room created: {room_url}[/green]")
-        return {
+        response = {
             "status": "ready",
             "room_url": room_url,
             "instructions": "Open the room URL in your browser to start talking",
         }
+        start_url = _build_start_url(room_url)
+        if start_url:
+            response["start_url"] = start_url
+        return response
 
     except Exception as e:
         console.print(f"[red]Failed to start session: {e}[/red]")
