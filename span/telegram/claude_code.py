@@ -77,7 +77,15 @@ class ClaudeCodeRunner:
         if session_id:
             cmd.extend(["--resume", session_id])
 
-        console.print(f"[blue]Running: {' '.join(cmd[:4])}...[/blue]")
+        display_cmd = ["claude", "-p", "<prompt>", "--output-format", "stream-json"]
+        if "--verbose" in cmd:
+            display_cmd.append("--verbose")
+        if session_id:
+            display_cmd.extend(["--resume", session_id])
+        console.print(f"[blue]Running: {' '.join(display_cmd)}[/blue]")
+
+        stderr_task: asyncio.Task[None] | None = None
+        stderr_buf = bytearray()
 
         try:
             self._current_process = await asyncio.create_subprocess_exec(
@@ -86,6 +94,20 @@ class ClaudeCodeRunner:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+
+            async def drain_stderr() -> None:
+                stderr_stream = self._current_process.stderr
+                if not stderr_stream:
+                    return
+                while True:
+                    chunk = await stderr_stream.read(4096)
+                    if not chunk:
+                        break
+                    stderr_buf.extend(chunk)
+                    if len(stderr_buf) > 64_000:
+                        stderr_buf[:] = stderr_buf[-64_000:]
+
+            stderr_task = asyncio.create_task(drain_stderr())
 
             output_lines: list[str] = []
             new_session_id = ""
@@ -100,11 +122,17 @@ class ClaudeCodeRunner:
                     )
                 except asyncio.TimeoutError:
                     self._current_process.kill()
+                    stderr_str = stderr_buf.decode(errors="replace").strip()
+                    if stderr_str:
+                        stderr_str = stderr_str[-200:]
+                        error = f"Execution timed out after 5 minutes: {stderr_str}"
+                    else:
+                        error = "Execution timed out after 5 minutes"
                     return CCExecutionResult(
                         success=False,
                         session_id=new_session_id,
                         output="",
-                        error="Execution timed out after 5 minutes",
+                        error=error,
                     )
 
                 if not line:
@@ -141,11 +169,13 @@ class ClaudeCodeRunner:
                     # Non-JSON output, might be plain text
                     output_lines.append(line_str)
 
-            # Read any remaining stderr
-            stderr_data = await self._current_process.stderr.read()
-            stderr_str = stderr_data.decode().strip() if stderr_data else ""
-
             await self._current_process.wait()
+            if stderr_task:
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
+            stderr_str = stderr_buf.decode(errors="replace").strip()
             returncode = self._current_process.returncode
             success = returncode == 0
 
@@ -182,6 +212,12 @@ class ClaudeCodeRunner:
                 error=str(e),
             )
         finally:
+            if stderr_task:
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
             self._current_process = None
 
     def _extract_progress(self, event: dict) -> str | None:
@@ -277,7 +313,7 @@ class ClaudeCodeRunner:
         """Get a brief summary of changes to a file."""
         # Get diff stats
         stat_proc = await asyncio.create_subprocess_exec(
-            "git", "diff", "--stat", "--", file_path,
+            "git", "diff", "--shortstat", "--", file_path,
             cwd=self.working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -305,20 +341,22 @@ class ClaudeCodeRunner:
     async def discard_changes(self) -> None:
         """Revert all uncommitted changes."""
         # Discard tracked file changes
-        await asyncio.create_subprocess_exec(
+        checkout_proc = await asyncio.create_subprocess_exec(
             "git", "checkout", ".",
             cwd=self.working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        await checkout_proc.wait()
 
         # Remove untracked files
-        await asyncio.create_subprocess_exec(
+        clean_proc = await asyncio.create_subprocess_exec(
             "git", "clean", "-fd",
             cwd=self.working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        await clean_proc.wait()
 
         console.print("[yellow]Changes reverted[/yellow]")
 

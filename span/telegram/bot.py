@@ -354,6 +354,10 @@ class SpanTelegramBot:
         @self.dp.callback_query(F.data.startswith("cc_"))
         async def cc_callback_handler(callback: CallbackQuery) -> None:
             """Handle Claude Code action buttons (push/followup/discard)."""
+            if callback.from_user.id != self.config.telegram_user_id:
+                await callback.answer("Unauthorized", show_alert=True)
+                return
+
             action = callback.data.replace("cc_", "")
             await callback.answer()
 
@@ -653,7 +657,17 @@ class SpanTelegramBot:
                 "changes": result.changes,
             }
 
-            # Build summary message
+            # Mark progress message as done (keep the log visible)
+            final_progress = progress_lines[-15:] if progress_lines else ["(no output)"]
+            try:
+                await status_msg.edit_text(
+                    "✅ *Done*\n\n" + "\n".join(f"• {line}" for line in final_progress),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass  # Ignore edit errors
+
+            # Build summary message (as NEW message, not edit)
             if result.success:
                 summary = "✅ *Claude Code completed.*\n\n"
             else:
@@ -668,7 +682,7 @@ class SpanTelegramBot:
                 if len(result.changes) > 10:
                     summary += f"\n_...and {len(result.changes) - 10} more files_\n"
 
-                # Show action buttons
+                # Show action buttons in NEW message
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="🚀 Push & Restart", callback_data="cc_push"),
@@ -678,11 +692,11 @@ class SpanTelegramBot:
                         InlineKeyboardButton(text="🗑️ Discard", callback_data="cc_discard"),
                     ],
                 ])
-                await status_msg.edit_text(summary, reply_markup=keyboard, parse_mode="Markdown")
+                await message.answer(summary, reply_markup=keyboard, parse_mode="Markdown")
             else:
                 summary += "_No file changes detected._\n\n"
                 summary += "Reply with `cc <follow-up>` if you want to try again."
-                await status_msg.edit_text(summary, parse_mode="Markdown")
+                await message.answer(summary, parse_mode="Markdown")
                 # Keep session for potential follow-up (don't clear)
 
         except Exception as e:
@@ -731,12 +745,13 @@ class SpanTelegramBot:
         }))
 
         # Touch sentinel to trigger restart
-        sentinel = data_dir / "restart_sentinel"
-        sentinel.touch()
-
         await callback.message.edit_text(
             "✅ Changes pushed. Restarting bot...\n\nI'll message you when I'm back online."
         )
+
+        # Touch sentinel to trigger restart (after user sees the confirmation)
+        sentinel = data_dir / "restart_sentinel"
+        sentinel.touch()
 
         # Clean up and exit
         self._cc_session = None

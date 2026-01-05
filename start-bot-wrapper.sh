@@ -69,12 +69,13 @@ while true; do
         sleep 1
     done
 
-    # Check if process exited on its own
-    if ! kill -0 $BOT_PID 2>/dev/null; then
-        wait $BOT_PID 2>/dev/null || true
+    # Reap the bot process and log exit code
+    if wait $BOT_PID 2>/dev/null; then
+        EXIT_CODE=0
+    else
         EXIT_CODE=$?
-        echo "[$(date)] Bot exited with code $EXIT_CODE" >> "$LOG"
     fi
+    echo "[$(date)] Bot exited with code $EXIT_CODE" >> "$LOG"
 
     # Brief pause before restart
     echo "[$(date)] Restarting in 2 seconds..." >> "$LOG"
