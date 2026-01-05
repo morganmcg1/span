@@ -31,9 +31,10 @@ class CCExecutionResult:
 
     success: bool
     session_id: str  # For --resume if follow-up needed
-    output: str  # Claude's final response
+    output: str  # Truncated progress for display
     error: str | None
     changes: list[FileChange] = field(default_factory=list)
+    full_output: str = ""  # Complete text content for log file
 
 
 class ClaudeCodeRunner:
@@ -73,7 +74,13 @@ class ClaudeCodeRunner:
 
         # Build command
         # Note: --output-format stream-json requires --verbose when using -p
-        cmd = ["claude", "-p", full_prompt, "--output-format", "stream-json", "--verbose"]
+        # Use Opus model for best quality code changes
+        cmd = [
+            "claude", "-p", full_prompt,
+            "--output-format", "stream-json",
+            "--verbose",
+            "--model", "claude-opus-4-5-20251101",
+        ]
         if session_id:
             cmd.extend(["--resume", session_id])
 
@@ -111,7 +118,8 @@ class ClaudeCodeRunner:
 
             stderr_task = asyncio.create_task(drain_stderr())
 
-            output_lines: list[str] = []
+            output_lines: list[str] = []  # Truncated progress for display
+            full_text_blocks: list[str] = []  # Full text content for log file
             new_session_id = ""
             last_progress_time = 0.0
 
@@ -150,6 +158,7 @@ class ClaudeCodeRunner:
                 try:
                     event = json.loads(line_str)
                     progress_text = self._extract_progress(event)
+                    full_text = self._extract_full_text(event)
 
                     # Extract session ID from various event types
                     if event.get("session_id"):
@@ -160,6 +169,11 @@ class ClaudeCodeRunner:
                     if event.get("type") == "result":
                         if event.get("result"):
                             output_lines.append(event["result"])
+                            full_text_blocks.append(event["result"])
+
+                    # Capture full text content (untruncated)
+                    if full_text:
+                        full_text_blocks.append(full_text)
 
                     if progress_text:
                         output_lines.append(progress_text)
@@ -202,9 +216,10 @@ class ClaudeCodeRunner:
             return CCExecutionResult(
                 success=success,
                 session_id=new_session_id,
-                output="\n".join(output_lines),  # Full output, no truncation
+                output="\n".join(output_lines),  # Truncated progress for display
                 error=error_msg,
                 changes=changes,
+                full_output="\n".join(full_text_blocks),  # Complete text for log
             )
 
         except Exception as e:
@@ -258,6 +273,19 @@ class ClaudeCodeRunner:
                     text = block.get("text", "")
                     if len(text) > 100:
                         return text[:100] + "..."
+                    return text if text else None
+
+        return None
+
+    def _extract_full_text(self, event: dict) -> str | None:
+        """Extract complete text content from stream-json event (no truncation)."""
+        event_type = event.get("type")
+
+        if event_type == "assistant":
+            content = event.get("message", {}).get("content", [])
+            for block in content:
+                if block.get("type") == "text":
+                    text = block.get("text", "")
                     return text if text else None
 
         return None

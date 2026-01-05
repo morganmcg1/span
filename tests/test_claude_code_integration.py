@@ -193,3 +193,18 @@ class TestClaudeCodeOutputCapture:
         # Should complete without the "chunk exceed limit" error
         assert result.error is None or "chunk" not in (result.error or "").lower()
         assert result.session_id, "Should complete and return session ID"
+
+    @pytest.mark.asyncio
+    async def test_full_output_not_truncated(self, runner, temp_repo):
+        """Test that full_output contains complete text without truncation."""
+        result = await runner.execute(
+            "Write a detailed paragraph about testing software. Be thorough and write at least 200 words."
+        )
+
+        # full_output should contain complete text
+        assert result.full_output, "Should have full_output"
+        # If text was truncated to 100 chars, we'd see '...' and short content
+        # Full output should be longer than 100 chars for a detailed paragraph
+        if len(result.full_output) > 100:
+            # Should NOT end with the truncation marker from progress extraction
+            assert not result.full_output.strip().endswith("..."), "full_output should not be truncated"

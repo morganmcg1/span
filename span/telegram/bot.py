@@ -662,6 +662,7 @@ class SpanTelegramBot:
                 "chat_id": chat_id,
                 "changes": result.changes,
                 "output": result.output,
+                "full_output": result.full_output,
                 "progress_lines": progress_lines,
             }
 
@@ -829,15 +830,15 @@ class SpanTelegramBot:
             await callback.message.answer("No session data available.")
             return
 
-        # Combine progress lines and output
+        # Use full_output (complete text) instead of truncated progress
+        full_output = self._cc_session.get("full_output", "")
         progress = self._cc_session.get("progress_lines", [])
-        output = self._cc_session.get("output", "")
 
         log_content = "=== Claude Code Session Log ===\n\n"
-        log_content += "--- Progress ---\n"
+        log_content += "--- Progress Summary ---\n"
         log_content += "\n".join(progress) if progress else "(no progress logged)"
-        log_content += "\n\n--- Final Output ---\n"
-        log_content += output if output else "(no output)"
+        log_content += "\n\n--- Full Text Output ---\n"
+        log_content += full_output if full_output else "(no text output captured)"
 
         # Send as a text file
         file = BufferedInputFile(
