@@ -367,6 +367,8 @@ class SpanTelegramBot:
                 await self._handle_cc_followup(callback)
             elif action == "discard":
                 await self._handle_cc_discard(callback)
+            elif action == "new":
+                await self._handle_cc_new_session(callback)
 
         @self.dp.message(F.text)
         async def text_handler(message: Message) -> None:
@@ -694,9 +696,16 @@ class SpanTelegramBot:
                 ])
                 await message.answer(summary, reply_markup=keyboard, parse_mode="Markdown")
             else:
-                summary += "_No file changes detected._\n\n"
-                summary += "Reply with `cc <follow-up>` if you want to try again."
-                await message.answer(summary, parse_mode="Markdown")
+                summary += "_No file changes detected._"
+
+                # Show options: continue session or start fresh
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="📝 Follow Up", callback_data="cc_followup"),
+                        InlineKeyboardButton(text="🆕 New Session", callback_data="cc_new"),
+                    ],
+                ])
+                await message.answer(summary, reply_markup=keyboard, parse_mode="Markdown")
                 # Keep session for potential follow-up (don't clear)
 
         except Exception as e:
@@ -778,7 +787,16 @@ class SpanTelegramBot:
 
         # Clear session
         self._cc_session = None
+
+    async def _handle_cc_new_session(self, callback: CallbackQuery) -> None:
+        """Handle New Session button - clear session and start fresh."""
+        self._cc_session = None
         self._cc_runner = None
+
+        await callback.message.edit_text(
+            "🆕 Session cleared.\n\n"
+            "Reply with `cc <your request>` to start a fresh session."
+        )
 
     async def send_vocabulary_reminder(self, items: list[CurriculumItem]) -> None:
         """Proactively send vocabulary to review."""
