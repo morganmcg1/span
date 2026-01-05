@@ -17,10 +17,10 @@ from span.config import Config, CONVERSATION_HISTORY_LIMIT, EXTRACTION_INTERVAL
 from span.curriculum.scheduler import CurriculumScheduler
 from span.db.database import Database
 from span.db.models import CurriculumItem, User
-from span.llm.client import ClaudeClient, ChatResponse, Message as LLMMessage
+from span.llm.client import ClaudeClient, Message as LLMMessage
 from span.llm.prompts import TELEGRAM_TUTOR_SYSTEM_PROMPT, VOICE_NOTE_TUTOR_PROMPT
 from span.memory.extractor import MemoryExtractor
-from span.telegram.claude_code import ClaudeCodeRunner, CCExecutionResult
+from span.telegram.claude_code import ClaudeCodeRunner
 from span.telegram.voice_handler import RealtimeVoiceClient
 
 
@@ -282,7 +282,16 @@ class SpanTelegramBot:
             }
 
             if cmd in handlers:
-                await handlers[cmd](callback.message)
+                if not callback.message:
+                    await self.bot.send_message(
+                        chat_id=callback.from_user.id,
+                        text="Sorry, I couldn't find the message context for that button. Try again from /start.",
+                    )
+                    return
+
+                # callback.message is a bot-sent message; swap from_user so handlers target the clicker.
+                synthetic_message = callback.message.model_copy(update={"from_user": callback.from_user})
+                await handlers[cmd](synthetic_message)
 
         # Button callback handlers for AI-generated options
         @self.dp.callback_query(F.data.startswith("ai_"))
@@ -533,6 +542,19 @@ class SpanTelegramBot:
                         "telegram_voice",
                     )
 
+                # Track message count and trigger extraction (same as text handler)
+                self._message_count[user.id] = self._message_count.get(user.id, 0) + 1
+                if self._message_count[user.id] >= EXTRACTION_INTERVAL:
+                    self._message_count[user.id] = 0
+                    # Get last few messages for extraction (includes voice transcripts)
+                    recent_history = self.db.get_conversation_history(user.id, limit=6)
+                    recent = [{"role": m.role, "content": m.content} for m in recent_history]
+                    if response.user_transcript:
+                        recent.append({"role": "user", "content": response.user_transcript})
+                    if response.assistant_transcript:
+                        recent.append({"role": "assistant", "content": response.assistant_transcript})
+                    self.memory_extractor.schedule_extraction(user.id, recent, "telegram_voice")
+
                 # Send voice response
                 if response.audio_bytes:
                     with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
@@ -642,7 +664,7 @@ class SpanTelegramBot:
 
         # Initialize runner
         repo_root = str(Path(__file__).parent.parent.parent)
-        self._cc_runner = ClaudeCodeRunner(repo_root)
+        self._cc_runner = ClaudeCodeRunner(repo_root, require_clean_worktree=True)
 
         # Get session ID for resumption (already checked in is_resuming)
         session_to_resume = self._cc_session.get("session_id") if is_resuming else None
