@@ -10,7 +10,7 @@ from pathlib import Path
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from rich.console import Console
 
 from span.config import Config, CONVERSATION_HISTORY_LIMIT, EXTRACTION_INTERVAL
@@ -371,6 +371,8 @@ class SpanTelegramBot:
                 await self._handle_cc_new_session(callback)
             elif action == "end":
                 await self._handle_cc_end_session(callback)
+            elif action == "log":
+                await self._handle_cc_log(callback)
 
         @self.dp.message(F.text)
         async def text_handler(message: Message) -> None:
@@ -659,6 +661,8 @@ class SpanTelegramBot:
                 "session_id": result.session_id,
                 "chat_id": chat_id,
                 "changes": result.changes,
+                "output": result.output,
+                "progress_lines": progress_lines,
             }
 
             # Mark progress message as done (keep the log visible)
@@ -695,6 +699,9 @@ class SpanTelegramBot:
                     ],
                     [
                         InlineKeyboardButton(text="🗑️ Discard", callback_data="cc_discard"),
+                        InlineKeyboardButton(text="📄 Full Log", callback_data="cc_log"),
+                    ],
+                    [
                         InlineKeyboardButton(text="🔚 End Session", callback_data="cc_end"),
                     ],
                 ])
@@ -706,9 +713,10 @@ class SpanTelegramBot:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="📝 Follow Up", callback_data="cc_followup"),
-                        InlineKeyboardButton(text="🆕 New Session", callback_data="cc_new"),
+                        InlineKeyboardButton(text="📄 Full Log", callback_data="cc_log"),
                     ],
                     [
+                        InlineKeyboardButton(text="🆕 New Session", callback_data="cc_new"),
                         InlineKeyboardButton(text="🔚 End Session", callback_data="cc_end"),
                     ],
                 ])
@@ -814,6 +822,29 @@ class SpanTelegramBot:
             "👋 Claude Code session ended.\n\n"
             "Back to normal bot mode. Send Spanish messages to practice!"
         )
+
+    async def _handle_cc_log(self, callback: CallbackQuery) -> None:
+        """Handle Full Log button - send full output as a downloadable file."""
+        if not self._cc_session:
+            await callback.message.answer("No session data available.")
+            return
+
+        # Combine progress lines and output
+        progress = self._cc_session.get("progress_lines", [])
+        output = self._cc_session.get("output", "")
+
+        log_content = "=== Claude Code Session Log ===\n\n"
+        log_content += "--- Progress ---\n"
+        log_content += "\n".join(progress) if progress else "(no progress logged)"
+        log_content += "\n\n--- Final Output ---\n"
+        log_content += output if output else "(no output)"
+
+        # Send as a text file
+        file = BufferedInputFile(
+            log_content.encode("utf-8"),
+            filename="claude_code_log.txt",
+        )
+        await callback.message.answer_document(file, caption="📄 Full Claude Code session log")
 
     async def send_vocabulary_reminder(self, items: list[CurriculumItem]) -> None:
         """Proactively send vocabulary to review."""
