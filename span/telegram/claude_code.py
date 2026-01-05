@@ -72,7 +72,8 @@ class ClaudeCodeRunner:
             full_prompt = prompt
 
         # Build command
-        cmd = ["claude", "-p", full_prompt, "--output-format", "stream-json"]
+        # Note: --output-format stream-json requires --verbose when using -p
+        cmd = ["claude", "-p", full_prompt, "--output-format", "stream-json", "--verbose"]
         if session_id:
             cmd.extend(["--resume", session_id])
 
