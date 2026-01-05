@@ -1,0 +1,342 @@
+"""Claude Code integration for running claude CLI from Telegram."""
+
+import asyncio
+import json
+import os
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Awaitable, Callable
+
+from rich.console import Console
+
+console = Console()
+
+# Timeout for Claude Code execution (5 minutes)
+EXECUTION_TIMEOUT = 300
+
+
+@dataclass
+class FileChange:
+    """A single file change made by Claude Code."""
+
+    path: str
+    action: str  # "edited", "created", "deleted"
+    summary: str  # Brief description of what changed
+
+
+@dataclass
+class CCExecutionResult:
+    """Result of Claude Code execution."""
+
+    success: bool
+    session_id: str  # For --resume if follow-up needed
+    output: str  # Claude's final response
+    error: str | None
+    changes: list[FileChange] = field(default_factory=list)
+
+
+class ClaudeCodeRunner:
+    """Runs claude CLI and manages code changes."""
+
+    def __init__(self, working_dir: str):
+        self.working_dir = working_dir
+        self._current_process: asyncio.subprocess.Process | None = None
+
+    async def execute(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+    ) -> CCExecutionResult:
+        """Execute claude CLI with streaming output.
+
+        Args:
+            prompt: The prompt to send to Claude Code
+            session_id: Optional session ID to resume a previous session
+            on_progress: Callback for progress updates
+
+        Returns:
+            CCExecutionResult with success status, session_id, output, and changes
+        """
+        # Build command
+        cmd = ["claude", "-p", prompt, "--output-format", "stream-json"]
+        if session_id:
+            cmd.extend(["--resume", session_id])
+
+        console.print(f"[blue]Running: {' '.join(cmd[:4])}...[/blue]")
+
+        try:
+            self._current_process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=self.working_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            output_lines: list[str] = []
+            new_session_id = ""
+            last_progress_time = 0.0
+
+            # Stream output
+            while True:
+                try:
+                    line = await asyncio.wait_for(
+                        self._current_process.stdout.readline(),
+                        timeout=EXECUTION_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    self._current_process.kill()
+                    return CCExecutionResult(
+                        success=False,
+                        session_id=new_session_id,
+                        output="",
+                        error="Execution timed out after 5 minutes",
+                    )
+
+                if not line:
+                    break
+
+                line_str = line.decode().strip()
+                if not line_str:
+                    continue
+
+                try:
+                    event = json.loads(line_str)
+                    progress_text = self._extract_progress(event)
+
+                    # Extract session ID from init event
+                    if event.get("type") == "system" and event.get("session_id"):
+                        new_session_id = event["session_id"]
+
+                    # Also check result event for session_id
+                    if event.get("type") == "result":
+                        if event.get("session_id"):
+                            new_session_id = event["session_id"]
+                        if event.get("result"):
+                            output_lines.append(event["result"])
+
+                    if progress_text:
+                        output_lines.append(progress_text)
+                        # Rate-limit progress callbacks
+                        now = time.time()
+                        if on_progress and (now - last_progress_time) >= 1.0:
+                            last_progress_time = now
+                            await on_progress(progress_text)
+
+                except json.JSONDecodeError:
+                    # Non-JSON output, might be plain text
+                    output_lines.append(line_str)
+
+            await self._current_process.wait()
+            success = self._current_process.returncode == 0
+
+            # Parse changes from git diff
+            changes = await self._detect_changes()
+
+            return CCExecutionResult(
+                success=success,
+                session_id=new_session_id,
+                output="\n".join(output_lines[-20:]),  # Last 20 lines
+                error=None if success else "Claude Code exited with error",
+                changes=changes,
+            )
+
+        except Exception as e:
+            console.print(f"[red]Claude Code error: {e}[/red]")
+            return CCExecutionResult(
+                success=False,
+                session_id="",
+                output="",
+                error=str(e),
+            )
+        finally:
+            self._current_process = None
+
+    def _extract_progress(self, event: dict) -> str | None:
+        """Extract human-readable progress from stream-json event."""
+        event_type = event.get("type")
+
+        if event_type == "assistant":
+            content = event.get("message", {}).get("content", [])
+            for block in content:
+                if block.get("type") == "tool_use":
+                    tool_name = block.get("name", "unknown")
+                    tool_input = block.get("input", {})
+
+                    # Extract relevant info based on tool
+                    if tool_name in ("Read", "Glob", "Grep"):
+                        path = tool_input.get("file_path") or tool_input.get("path") or tool_input.get("pattern", "")
+                        return f"Reading: {Path(path).name}" if path else f"Using: {tool_name}"
+                    elif tool_name == "Edit":
+                        path = tool_input.get("file_path", "")
+                        return f"Editing: {Path(path).name}" if path else "Editing file"
+                    elif tool_name == "Write":
+                        path = tool_input.get("file_path", "")
+                        return f"Writing: {Path(path).name}" if path else "Writing file"
+                    elif tool_name == "Bash":
+                        cmd = tool_input.get("command", "")
+                        # Truncate long commands
+                        if len(cmd) > 50:
+                            cmd = cmd[:50] + "..."
+                        return f"Running: {cmd}"
+                    else:
+                        return f"Using: {tool_name}"
+
+                elif block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > 100:
+                        return text[:100] + "..."
+                    return text if text else None
+
+        return None
+
+    async def _detect_changes(self) -> list[FileChange]:
+        """Detect file changes using git diff and status."""
+        changes: list[FileChange] = []
+
+        # Get modified tracked files
+        diff_proc = await asyncio.create_subprocess_exec(
+            "git", "diff", "--name-only",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        diff_out, _ = await diff_proc.communicate()
+
+        for path in diff_out.decode().strip().split("\n"):
+            if path:
+                changes.append(FileChange(
+                    path=path,
+                    action="edited",
+                    summary=await self._get_diff_summary(path),
+                ))
+
+        # Get untracked/new files
+        status_proc = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        status_out, _ = await status_proc.communicate()
+
+        for line in status_out.decode().strip().split("\n"):
+            if not line:
+                continue
+            status_code = line[:2]
+            file_path = line[3:]
+
+            if status_code.startswith("??"):
+                changes.append(FileChange(
+                    path=file_path,
+                    action="created",
+                    summary="New file",
+                ))
+            elif "D" in status_code:
+                changes.append(FileChange(
+                    path=file_path,
+                    action="deleted",
+                    summary="Deleted",
+                ))
+
+        return changes
+
+    async def _get_diff_summary(self, file_path: str) -> str:
+        """Get a brief summary of changes to a file."""
+        # Get diff stats
+        stat_proc = await asyncio.create_subprocess_exec(
+            "git", "diff", "--stat", "--", file_path,
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stat_out, _ = await stat_proc.communicate()
+
+        stat_line = stat_out.decode().strip().split("\n")[-1] if stat_out else ""
+
+        # Parse insertions/deletions
+        if "insertion" in stat_line or "deletion" in stat_line:
+            # Extract numbers like "5 insertions(+), 2 deletions(-)"
+            parts = stat_line.split(",")
+            summary_parts = []
+            for part in parts:
+                if "insertion" in part:
+                    num = part.strip().split()[0]
+                    summary_parts.append(f"+{num}")
+                elif "deletion" in part:
+                    num = part.strip().split()[0]
+                    summary_parts.append(f"-{num}")
+            return " ".join(summary_parts) if summary_parts else "Modified"
+
+        return "Modified"
+
+    async def discard_changes(self) -> None:
+        """Revert all uncommitted changes."""
+        # Discard tracked file changes
+        await asyncio.create_subprocess_exec(
+            "git", "checkout", ".",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Remove untracked files
+        await asyncio.create_subprocess_exec(
+            "git", "clean", "-fd",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        console.print("[yellow]Changes reverted[/yellow]")
+
+    async def push_changes(self, commit_message: str) -> bool:
+        """Commit and push all changes.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Stage all changes
+        add_proc = await asyncio.create_subprocess_exec(
+            "git", "add", "-A",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await add_proc.wait()
+
+        # Commit
+        commit_proc = await asyncio.create_subprocess_exec(
+            "git", "commit", "-m", commit_message,
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, commit_err = await commit_proc.communicate()
+
+        if commit_proc.returncode != 0:
+            console.print(f"[red]Commit failed: {commit_err.decode()}[/red]")
+            return False
+
+        # Push
+        push_proc = await asyncio.create_subprocess_exec(
+            "git", "push",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, push_err = await push_proc.communicate()
+
+        if push_proc.returncode != 0:
+            console.print(f"[red]Push failed: {push_err.decode()}[/red]")
+            return False
+
+        console.print("[green]Changes committed and pushed[/green]")
+        return True
+
+    def cancel(self) -> None:
+        """Cancel the current execution if running."""
+        if self._current_process:
+            self._current_process.kill()
+            console.print("[yellow]Claude Code execution cancelled[/yellow]")

@@ -27,9 +27,13 @@ fi
 echo "📥 Pulling latest..."
 run_cmd "cd $REMOTE_DIR && git pull && /root/.local/bin/uv sync"
 
-# 3. Restart Telegram bot
+# 3. Restart Telegram bot (using wrapper for Claude Code restart support)
 echo "🤖 Restarting Telegram bot..."
-run_bg "$REMOTE_DIR/start-bot.sh"
+# Kill any existing bot/wrapper processes
+run_cmd "pkill -f 'span.telegram' || true; pkill -f 'start-bot-wrapper' || true"
+sleep 1
+# Start with wrapper for restart monitoring
+run_bg "nohup $REMOTE_DIR/start-bot-wrapper.sh > /dev/null 2>&1 &"
 
 # 4. Restart Voice server
 echo "🎤 Restarting Voice server..."

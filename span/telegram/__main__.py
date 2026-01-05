@@ -1,8 +1,10 @@
 """Main entry point for the Telegram bot."""
 
 import asyncio
+import json
 import random
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import aiohttp
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -146,6 +148,31 @@ async def main():
             title="Starting Span Telegram Bot",
         )
     )
+
+    # Check for pending restart notification (from Claude Code push & restart)
+    restart_file = Path(config.database_path).parent / "restart_pending.json"
+    if restart_file.exists():
+        try:
+            restart_info = json.loads(restart_file.read_text())
+            chat_id = restart_info.get("chat_id")
+            summary = restart_info.get("summary", "")
+
+            if chat_id:
+                notification = "✅ *Bot restarted successfully.*\n\nNew code is now active."
+                if summary:
+                    notification += f"\n\n*Changes applied:*\n{summary}"
+
+                await bot.bot.send_message(
+                    chat_id=chat_id,
+                    text=notification,
+                    parse_mode="Markdown",
+                )
+                console.print("[green]Sent restart notification[/green]")
+
+        except Exception as e:
+            console.print(f"[yellow]Failed to send restart notification: {e}[/yellow]")
+        finally:
+            restart_file.unlink(missing_ok=True)
 
     try:
         await bot.run()

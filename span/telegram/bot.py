@@ -1,8 +1,10 @@
 """Telegram bot for Spanish practice via text and voice notes."""
 
 import asyncio
+import json
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import aiohttp
@@ -18,6 +20,7 @@ from span.db.models import CurriculumItem, User
 from span.llm.client import ClaudeClient, ChatResponse, Message as LLMMessage
 from span.llm.prompts import TELEGRAM_TUTOR_SYSTEM_PROMPT, VOICE_NOTE_TUTOR_PROMPT
 from span.memory.extractor import MemoryExtractor
+from span.telegram.claude_code import ClaudeCodeRunner, CCExecutionResult
 from span.telegram.voice_handler import RealtimeVoiceClient
 
 
@@ -36,6 +39,10 @@ class SpanTelegramBot:
         self.scheduler = CurriculumScheduler(db)
         self.memory_extractor = MemoryExtractor(db, config.anthropic_api_key)
         self._message_count: dict[int, int] = {}  # user_id -> message count
+        # Claude Code integration state
+        self._cc_session: dict | None = None  # {session_id, chat_id, changes}
+        self._cc_runner: ClaudeCodeRunner | None = None
+        self._cc_in_progress = False
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -343,6 +350,20 @@ class SpanTelegramBot:
                 console.print(f"[red]AI button callback error: {e}[/red]")
                 await callback.message.answer(self._format_error(e, "text"))
 
+        # Claude Code callback handlers
+        @self.dp.callback_query(F.data.startswith("cc_"))
+        async def cc_callback_handler(callback: CallbackQuery) -> None:
+            """Handle Claude Code action buttons (push/followup/discard)."""
+            action = callback.data.replace("cc_", "")
+            await callback.answer()
+
+            if action == "push":
+                await self._handle_cc_push(callback)
+            elif action == "followup":
+                await self._handle_cc_followup(callback)
+            elif action == "discard":
+                await self._handle_cc_discard(callback)
+
         @self.dp.message(F.text)
         async def text_handler(message: Message) -> None:
             """Handle free-form text practice with shared conversation history."""
@@ -371,6 +392,17 @@ class SpanTelegramBot:
                     console.print(f"[red]Translation error: {e}[/red]")
                     await message.answer(self._format_error(e, "text"))
                     return
+
+            # Claude Code mode: "cc " prefix
+            if message.text.startswith(("cc ", "CC ")) and len(message.text) > 3:
+                # Only allow authorized user
+                if message.from_user.id != self.config.telegram_user_id:
+                    await message.answer("Unauthorized: Only the bot owner can use Claude Code.")
+                    return
+
+                prompt = message.text[3:]
+                await self._handle_claude_code(message, prompt)
+                return
 
             try:
                 # Get learner profile for personalized context
@@ -554,6 +586,184 @@ class SpanTelegramBot:
             return f"🔧 *Voice glitch*\n\n`{error_snippet}`\n\nTry text instead?"
         else:
             return f"🔧 *Glitch in the matrix*\n\n`{error_snippet}`"
+
+    # ==================== Claude Code Integration ====================
+
+    async def _handle_claude_code(self, message: Message, prompt: str) -> None:
+        """Execute Claude Code and show results with action buttons."""
+        # Check if already running
+        if self._cc_in_progress:
+            await message.answer("Claude Code is already running. Please wait.")
+            return
+
+        self._cc_in_progress = True
+        chat_id = message.chat.id
+
+        # Check if we're resuming a session
+        is_resuming = self._cc_session and self._cc_session.get("session_id")
+
+        # Send initial status message
+        if is_resuming:
+            status_msg = await message.answer("⏳ Continuing Claude Code session...")
+        else:
+            status_msg = await message.answer("⏳ Running Claude Code...")
+
+        # Progress tracking
+        progress_lines: list[str] = []
+        last_update = 0.0
+
+        async def on_progress(text: str) -> None:
+            nonlocal last_update
+            progress_lines.append(text)
+
+            now = time.time()
+            if now - last_update >= 2.0:  # Update every 2 seconds
+                last_update = now
+                # Keep last 10 lines
+                display_lines = progress_lines[-10:]
+                header = "⏳ Continuing Claude Code session..." if is_resuming else "⏳ Running Claude Code..."
+                try:
+                    await status_msg.edit_text(
+                        f"{header}\n\n"
+                        + "\n".join(f"• {line}" for line in display_lines)
+                    )
+                except Exception:
+                    pass  # Ignore edit errors
+
+        # Initialize runner
+        repo_root = str(Path(__file__).parent.parent.parent)
+        self._cc_runner = ClaudeCodeRunner(repo_root)
+
+        # Get session ID for resumption (already checked in is_resuming)
+        session_to_resume = self._cc_session.get("session_id") if is_resuming else None
+        if session_to_resume:
+            console.print(f"[blue]Resuming session: {session_to_resume}[/blue]")
+
+        try:
+            result = await self._cc_runner.execute(
+                prompt,
+                session_id=session_to_resume,
+                on_progress=on_progress,
+            )
+
+            # Store session for potential follow-up
+            self._cc_session = {
+                "session_id": result.session_id,
+                "chat_id": chat_id,
+                "changes": result.changes,
+            }
+
+            # Build summary message
+            if result.success:
+                summary = "✅ *Claude Code completed.*\n\n"
+            else:
+                summary = f"⚠️ *Claude Code finished with issues:*\n`{result.error}`\n\n"
+
+            if result.changes:
+                summary += "*Changes:*\n"
+                for change in result.changes[:10]:  # Limit to 10 files
+                    action_emoji = {"edited": "📝", "created": "➕", "deleted": "🗑️"}.get(change.action, "•")
+                    summary += f"{action_emoji} `{change.path}` - {change.summary}\n"
+
+                if len(result.changes) > 10:
+                    summary += f"\n_...and {len(result.changes) - 10} more files_\n"
+
+                # Show action buttons
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="🚀 Push & Restart", callback_data="cc_push"),
+                        InlineKeyboardButton(text="📝 Follow Up", callback_data="cc_followup"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="🗑️ Discard", callback_data="cc_discard"),
+                    ],
+                ])
+                await status_msg.edit_text(summary, reply_markup=keyboard, parse_mode="Markdown")
+            else:
+                summary += "_No file changes detected._\n\n"
+                summary += "Reply with `cc <follow-up>` if you want to try again."
+                await status_msg.edit_text(summary, parse_mode="Markdown")
+                # Keep session for potential follow-up (don't clear)
+
+        except Exception as e:
+            console.print(f"[red]Claude Code error: {e}[/red]")
+            await status_msg.edit_text(f"❌ Claude Code failed: {e}")
+            self._cc_session = None
+
+        finally:
+            self._cc_in_progress = False
+
+    async def _handle_cc_push(self, callback: CallbackQuery) -> None:
+        """Handle Push & Restart button - commit, push, and restart bot."""
+        if not self._cc_runner or not self._cc_session:
+            await callback.message.edit_text("No pending changes to push.")
+            return
+
+        await callback.message.edit_text("📤 Committing and pushing changes...")
+
+        # Build change summary for restart notification
+        changes_summary = ""
+        if self._cc_session.get("changes"):
+            changes_summary = "\n".join(
+                f"• {c.path}" for c in self._cc_session["changes"][:5]
+            )
+
+        # Commit and push
+        success = await self._cc_runner.push_changes(
+            "Update via Telegram Claude Code\n\n🤖 Generated with Claude Code"
+        )
+
+        if not success:
+            await callback.message.edit_text(
+                "❌ Failed to push changes. Try again or discard.",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🗑️ Discard", callback_data="cc_discard")],
+                ]),
+            )
+            return
+
+        # Save restart notification info
+        data_dir = Path(self.config.database_path).parent
+        restart_file = data_dir / "restart_pending.json"
+        restart_file.write_text(json.dumps({
+            "chat_id": self._cc_session["chat_id"],
+            "summary": changes_summary,
+        }))
+
+        # Touch sentinel to trigger restart
+        sentinel = data_dir / "restart_sentinel"
+        sentinel.touch()
+
+        await callback.message.edit_text(
+            "✅ Changes pushed. Restarting bot...\n\nI'll message you when I'm back online."
+        )
+
+        # Clean up and exit
+        self._cc_session = None
+        self._cc_runner = None
+
+        # Give time for message to send
+        await asyncio.sleep(1)
+        os._exit(0)  # Hard exit to trigger wrapper restart
+
+    async def _handle_cc_followup(self, callback: CallbackQuery) -> None:
+        """Handle Follow Up button - prompt for more changes."""
+        await callback.message.edit_text(
+            "What else would you like to change?\n\n"
+            "Reply with `cc <your follow-up>` to continue."
+        )
+        # Session ID is preserved in self._cc_session for --resume
+
+    async def _handle_cc_discard(self, callback: CallbackQuery) -> None:
+        """Handle Discard button - revert all changes."""
+        if self._cc_runner:
+            await self._cc_runner.discard_changes()
+
+        await callback.message.edit_text("🗑️ Changes reverted.")
+
+        # Clear session
+        self._cc_session = None
+        self._cc_runner = None
 
     async def send_vocabulary_reminder(self, items: list[CurriculumItem]) -> None:
         """Proactively send vocabulary to review."""
