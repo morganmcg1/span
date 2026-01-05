@@ -197,7 +197,7 @@ OPENAI_API_KEY=your_openai_key  # Required for voice notes
 The bot sends a daily voice practice reminder at a **random time between 9:30-10:30am** Dublin time (Europe/Dublin timezone). Each day the time varies to feel more natural. The reminder includes a pre-created voice room link if the voice server is running.
 
 ### Voice Randomization
-Each voice session (both voice calls and Telegram voice notes) uses a **randomly selected voice** from the full OpenAI Realtime API voice set: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar.
+Each voice session (both voice calls and Telegram voice notes) uses a **randomly selected voice** from the OpenAI Realtime API voice set: alloy, ash, ballad, coral, echo, sage, shimmer, verse, marin, cedar. (Note: fable, onyx, nova are TTS-only and not available in Realtime API.)
 
 ### Commands
 | Command | Purpose |

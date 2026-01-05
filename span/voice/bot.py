@@ -23,10 +23,10 @@ from span.memory.extractor import MemoryExtractor
 from span.voice.tools import CURRICULUM_TOOLS, register_tools
 
 # OpenAI Realtime API voices - randomized each session for variety
-# Full list as of 2025: alloy, ash, ballad, coral, echo, fable, onyx, nova, sage, shimmer, verse, marin, cedar
+# Note: fable, onyx, nova are TTS-only and NOT supported by Realtime API
 OPENAI_REALTIME_VOICES = [
-    "alloy", "ash", "ballad", "coral", "echo", "fable",
-    "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar",
+    "alloy", "ash", "ballad", "coral", "echo",
+    "sage", "shimmer", "verse", "marin", "cedar",
 ]
 
 
