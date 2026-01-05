@@ -59,8 +59,20 @@ class ClaudeCodeRunner:
         Returns:
             CCExecutionResult with success status, session_id, output, and changes
         """
+        # Add context prefix for first-time prompts (not resuming)
+        if not session_id:
+            context_prefix = (
+                "You are making live, on-the-fly updates to the `span` repo, "
+                "a Mexican Spanish language learning app with voice calls and Telegram bot. "
+                "Make the requested changes. The user will review and decide whether to deploy.\n\n"
+                "User request: "
+            )
+            full_prompt = context_prefix + prompt
+        else:
+            full_prompt = prompt
+
         # Build command
-        cmd = ["claude", "-p", prompt, "--output-format", "stream-json"]
+        cmd = ["claude", "-p", full_prompt, "--output-format", "stream-json"]
         if session_id:
             cmd.extend(["--resume", session_id])
 
@@ -128,17 +140,35 @@ class ClaudeCodeRunner:
                     # Non-JSON output, might be plain text
                     output_lines.append(line_str)
 
+            # Read any remaining stderr
+            stderr_data = await self._current_process.stderr.read()
+            stderr_str = stderr_data.decode().strip() if stderr_data else ""
+
             await self._current_process.wait()
-            success = self._current_process.returncode == 0
+            returncode = self._current_process.returncode
+            success = returncode == 0
+
+            # Log for debugging
+            console.print(f"[blue]Claude Code exit code: {returncode}[/blue]")
+            if stderr_str:
+                console.print(f"[yellow]stderr: {stderr_str[:500]}[/yellow]")
 
             # Parse changes from git diff
             changes = await self._detect_changes()
+
+            # Build error message if failed
+            error_msg = None
+            if not success:
+                error_msg = f"Exit code {returncode}"
+                if stderr_str:
+                    # Truncate stderr for display
+                    error_msg += f": {stderr_str[:200]}"
 
             return CCExecutionResult(
                 success=success,
                 session_id=new_session_id,
                 output="\n".join(output_lines[-20:]),  # Last 20 lines
-                error=None if success else "Claude Code exited with error",
+                error=error_msg,
                 changes=changes,
             )
 
