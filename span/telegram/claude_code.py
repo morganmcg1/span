@@ -202,7 +202,7 @@ class ClaudeCodeRunner:
             return CCExecutionResult(
                 success=success,
                 session_id=new_session_id,
-                output="\n".join(output_lines[-20:]),  # Last 20 lines
+                output="\n".join(output_lines),  # Full output, no truncation
                 error=error_msg,
                 changes=changes,
             )
