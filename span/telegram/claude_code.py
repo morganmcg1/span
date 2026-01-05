@@ -88,11 +88,13 @@ class ClaudeCodeRunner:
         stderr_buf = bytearray()
 
         try:
+            # Use high limit (10MB) to handle large JSON lines from Claude Code
             self._current_process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=self.working_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=10 * 1024 * 1024,
             )
 
             async def drain_stderr() -> None:
@@ -113,16 +115,10 @@ class ClaudeCodeRunner:
             new_session_id = ""
             last_progress_time = 0.0
 
-            # Stream output - use StreamReader with higher limit for large JSON lines
-            # Create a reader with 10MB limit to handle large file contents
-            reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
-            protocol = asyncio.StreamReaderProtocol(reader)
-            await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, self._current_process.stdout)
-
             while True:
                 try:
                     line = await asyncio.wait_for(
-                        reader.readline(),
+                        self._current_process.stdout.readline(),
                         timeout=EXECUTION_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
