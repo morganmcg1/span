@@ -146,14 +146,13 @@ class ClaudeCodeRunner:
                     event = json.loads(line_str)
                     progress_text = self._extract_progress(event)
 
-                    # Extract session ID from init event
-                    if event.get("type") == "system" and event.get("session_id"):
+                    # Extract session ID from various event types
+                    if event.get("session_id"):
                         new_session_id = event["session_id"]
+                        console.print(f"[green]Captured session_id: {new_session_id[:20]}...[/green]")
 
-                    # Also check result event for session_id
+                    # Also check nested structures
                     if event.get("type") == "result":
-                        if event.get("session_id"):
-                            new_session_id = event["session_id"]
                         if event.get("result"):
                             output_lines.append(event["result"])
 

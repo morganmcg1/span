@@ -369,6 +369,8 @@ class SpanTelegramBot:
                 await self._handle_cc_discard(callback)
             elif action == "new":
                 await self._handle_cc_new_session(callback)
+            elif action == "end":
+                await self._handle_cc_end_session(callback)
 
         @self.dp.message(F.text)
         async def text_handler(message: Message) -> None:
@@ -692,17 +694,21 @@ class SpanTelegramBot:
                     ],
                     [
                         InlineKeyboardButton(text="🗑️ Discard", callback_data="cc_discard"),
+                        InlineKeyboardButton(text="🔚 End Session", callback_data="cc_end"),
                     ],
                 ])
                 await message.answer(summary, reply_markup=keyboard, parse_mode="Markdown")
             else:
                 summary += "_No file changes detected._"
 
-                # Show options: continue session or start fresh
+                # Show options: continue session, start fresh, or end
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="📝 Follow Up", callback_data="cc_followup"),
                         InlineKeyboardButton(text="🆕 New Session", callback_data="cc_new"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="🔚 End Session", callback_data="cc_end"),
                     ],
                 ])
                 await message.answer(summary, reply_markup=keyboard, parse_mode="Markdown")
@@ -796,6 +802,16 @@ class SpanTelegramBot:
         await callback.message.edit_text(
             "🆕 Session cleared.\n\n"
             "Reply with `cc <your request>` to start a fresh session."
+        )
+
+    async def _handle_cc_end_session(self, callback: CallbackQuery) -> None:
+        """Handle End Session button - close CC mode and return to normal bot."""
+        self._cc_session = None
+        self._cc_runner = None
+
+        await callback.message.edit_text(
+            "👋 Claude Code session ended.\n\n"
+            "Back to normal bot mode. Send Spanish messages to practice!"
         )
 
     async def send_vocabulary_reminder(self, items: list[CurriculumItem]) -> None:
