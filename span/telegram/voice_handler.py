@@ -81,7 +81,11 @@ class RealtimeVoiceClient:
 
             # Send audio and get response
             await self._send_audio(ws, pcm_b64)
-            user_transcript, assistant_transcript, response_audio = await self._receive_response(ws)
+            try:
+                async with asyncio.timeout(90):
+                    user_transcript, assistant_transcript, response_audio = await self._receive_response(ws)
+            except asyncio.TimeoutError as e:
+                raise RuntimeError("Timeout waiting for Realtime API response") from e
 
         # Convert response to OGG
         if response_audio:

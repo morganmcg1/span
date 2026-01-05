@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,8 +39,9 @@ class CCExecutionResult:
 class ClaudeCodeRunner:
     """Runs claude CLI and manages code changes."""
 
-    def __init__(self, working_dir: str):
+    def __init__(self, working_dir: str, require_clean_worktree: bool = False):
         self.working_dir = working_dir
+        self.require_clean_worktree = require_clean_worktree
         self._current_process: asyncio.subprocess.Process | None = None
 
     async def execute(
@@ -71,6 +71,29 @@ class ClaudeCodeRunner:
             full_prompt = context_prefix + prompt
         else:
             full_prompt = prompt
+
+        # Starting a fresh Claude Code session on a dirty worktree is dangerous because it can
+        # mix unrelated local edits into the session and make discard/push operations unsafe.
+        if not session_id and self.require_clean_worktree:
+            status_proc = await asyncio.create_subprocess_exec(
+                "git",
+                "status",
+                "--porcelain",
+                cwd=self.working_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            status_out, _ = await status_proc.communicate()
+            if status_out.strip():
+                return CCExecutionResult(
+                    success=False,
+                    session_id="",
+                    output="",
+                    error=(
+                        "Working tree has uncommitted changes. Commit/stash them before starting a new "
+                        "Claude Code session (or push/discard the previous session)."
+                    ),
+                )
 
         # Build command
         # Note: --output-format stream-json requires --verbose when using -p
@@ -122,15 +145,24 @@ class ClaudeCodeRunner:
             full_text_blocks: list[str] = []  # Full text content for log file
             new_session_id = ""
             last_progress_time = 0.0
+            start_time = time.monotonic()
 
             while True:
                 try:
+                    remaining = max(0.0, EXECUTION_TIMEOUT - (time.monotonic() - start_time))
                     line = await asyncio.wait_for(
                         self._current_process.stdout.readline(),
-                        timeout=EXECUTION_TIMEOUT,
+                        timeout=remaining,
                     )
                 except asyncio.TimeoutError:
-                    self._current_process.kill()
+                    try:
+                        self._current_process.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        await self._current_process.wait()
+                    except Exception:
+                        pass
                     stderr_str = stderr_buf.decode(errors="replace").strip()
                     if stderr_str:
                         stderr_str = stderr_str[-200:]
@@ -294,24 +326,7 @@ class ClaudeCodeRunner:
         """Detect file changes using git diff and status."""
         changes: list[FileChange] = []
 
-        # Get modified tracked files
-        diff_proc = await asyncio.create_subprocess_exec(
-            "git", "diff", "--name-only",
-            cwd=self.working_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        diff_out, _ = await diff_proc.communicate()
-
-        for path in diff_out.decode().strip().split("\n"):
-            if path:
-                changes.append(FileChange(
-                    path=path,
-                    action="edited",
-                    summary=await self._get_diff_summary(path),
-                ))
-
-        # Get untracked/new files
+        # Unified view across staged + unstaged changes.
         status_proc = await asyncio.create_subprocess_exec(
             "git", "status", "--porcelain",
             cwd=self.working_dir,
@@ -326,7 +341,11 @@ class ClaudeCodeRunner:
             status_code = line[:2]
             file_path = line[3:]
 
-            if status_code.startswith("??"):
+            # Rename format: "R  old -> new"
+            if " -> " in file_path:
+                file_path = file_path.split(" -> ", 1)[1].strip()
+
+            if status_code.startswith("??") or "A" in status_code:
                 changes.append(FileChange(
                     path=file_path,
                     action="created",
@@ -338,12 +357,18 @@ class ClaudeCodeRunner:
                     action="deleted",
                     summary="Deleted",
                 ))
+            else:
+                changes.append(FileChange(
+                    path=file_path,
+                    action="edited",
+                    summary=await self._get_diff_summary(file_path),
+                ))
 
         return changes
 
     async def _get_diff_summary(self, file_path: str) -> str:
         """Get a brief summary of changes to a file."""
-        # Get diff stats
+        # Get diff stats (prefer unstaged; fall back to staged)
         stat_proc = await asyncio.create_subprocess_exec(
             "git", "diff", "--shortstat", "--", file_path,
             cwd=self.working_dir,
@@ -352,7 +377,21 @@ class ClaudeCodeRunner:
         )
         stat_out, _ = await stat_proc.communicate()
 
-        stat_line = stat_out.decode().strip().split("\n")[-1] if stat_out else ""
+        stat_line = stat_out.decode().strip().split("\n")[-1] if stat_out.strip() else ""
+        if not stat_line:
+            stat_proc = await asyncio.create_subprocess_exec(
+                "git",
+                "diff",
+                "--cached",
+                "--shortstat",
+                "--",
+                file_path,
+                cwd=self.working_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stat_out, _ = await stat_proc.communicate()
+            stat_line = stat_out.decode().strip().split("\n")[-1] if stat_out.strip() else ""
 
         # Parse insertions/deletions
         if "insertion" in stat_line or "deletion" in stat_line:
@@ -372,16 +411,18 @@ class ClaudeCodeRunner:
 
     async def discard_changes(self) -> None:
         """Revert all uncommitted changes."""
-        # Discard tracked file changes
-        checkout_proc = await asyncio.create_subprocess_exec(
-            "git", "checkout", ".",
+        # Reset tracked changes (including staged changes)
+        reset_proc = await asyncio.create_subprocess_exec(
+            "git",
+            "reset",
+            "--hard",
             cwd=self.working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await checkout_proc.wait()
+        await reset_proc.wait()
 
-        # Remove untracked files
+        # Remove untracked files/directories (respects .gitignore)
         clean_proc = await asyncio.create_subprocess_exec(
             "git", "clean", "-fd",
             cwd=self.working_dir,
@@ -406,6 +447,21 @@ class ClaudeCodeRunner:
             stderr=asyncio.subprocess.PIPE,
         )
         await add_proc.wait()
+
+        # Nothing to commit (avoid failing the UI flow on a no-op)
+        diff_proc = await asyncio.create_subprocess_exec(
+            "git",
+            "diff",
+            "--cached",
+            "--quiet",
+            cwd=self.working_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await diff_proc.wait()
+        if diff_proc.returncode == 0:
+            console.print("[yellow]No staged changes to commit[/yellow]")
+            return True
 
         # Commit
         commit_proc = await asyncio.create_subprocess_exec(
@@ -439,5 +495,8 @@ class ClaudeCodeRunner:
     def cancel(self) -> None:
         """Cancel the current execution if running."""
         if self._current_process:
-            self._current_process.kill()
+            try:
+                self._current_process.kill()
+            except ProcessLookupError:
+                pass
             console.print("[yellow]Claude Code execution cancelled[/yellow]")
