@@ -113,11 +113,16 @@ class ClaudeCodeRunner:
             new_session_id = ""
             last_progress_time = 0.0
 
-            # Stream output
+            # Stream output - use StreamReader with higher limit for large JSON lines
+            # Create a reader with 10MB limit to handle large file contents
+            reader = asyncio.StreamReader(limit=10 * 1024 * 1024)
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, self._current_process.stdout)
+
             while True:
                 try:
                     line = await asyncio.wait_for(
-                        self._current_process.stdout.readline(),
+                        reader.readline(),
                         timeout=EXECUTION_TIMEOUT,
                     )
                 except asyncio.TimeoutError:
@@ -134,11 +139,15 @@ class ClaudeCodeRunner:
                         output="",
                         error=error,
                     )
+                except ValueError as e:
+                    # Line too long even with increased limit - skip it
+                    console.print(f"[yellow]Skipping oversized line: {e}[/yellow]")
+                    continue
 
                 if not line:
                     break
 
-                line_str = line.decode().strip()
+                line_str = line.decode(errors="replace").strip()
                 if not line_str:
                     continue
 
