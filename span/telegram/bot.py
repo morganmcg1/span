@@ -662,7 +662,8 @@ class SpanTelegramBot:
             }
 
             # Mark progress message as done (keep the log visible)
-            final_progress = progress_lines[-15:] if progress_lines else ["(no output)"]
+            # Show up to 40 lines, Telegram limit is 4096 chars
+            final_progress = progress_lines[-40:] if progress_lines else ["(no output)"]
             try:
                 await status_msg.edit_text(
                     "✅ *Done*\n\n" + "\n".join(f"• {line}" for line in final_progress),
