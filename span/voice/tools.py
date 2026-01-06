@@ -3,6 +3,7 @@
 Includes skill dimension tracking based on the adaptive curriculum framework.
 """
 
+import asyncio
 import json
 from datetime import datetime
 
@@ -327,10 +328,12 @@ class CurriculumToolHandlers:
 - Average quality score: {avg_display}
 - Recent practice: {[r['word'] for r in self.practice_records[-5:]]}
 
-Situation: {situation}
-Question: {question}"""
+        Situation: {situation}
+        Question: {question}"""
 
-        response = self.anthropic.messages.create(
+        # Anthropic client is synchronous; avoid blocking the voice event loop.
+        response = await asyncio.to_thread(
+            self.anthropic.messages.create,
             model=self.config.claude_model,
             max_tokens=200,
             system=CURRICULUM_ADVISOR_PROMPT,

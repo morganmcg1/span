@@ -23,6 +23,11 @@ def claude_available() -> bool:
     return shutil.which("claude") is not None
 
 
+def claude_integration_enabled() -> bool:
+    """Guard to prevent accidental paid integration tests on `pytest`."""
+    return os.environ.get("RUN_CLAUDE_CODE_TESTS", "") == "1"
+
+
 @pytest.fixture
 def temp_repo():
     """Create a temporary git repo for testing."""
@@ -42,6 +47,10 @@ def runner(temp_repo):
 
 
 @pytest.mark.skipif(not claude_available(), reason="claude CLI not available")
+@pytest.mark.skipif(
+    not claude_integration_enabled(),
+    reason="Set RUN_CLAUDE_CODE_TESTS=1 to run real claude CLI integration tests.",
+)
 class TestClaudeCodeIntegration:
     """Integration tests that make real Claude Code calls."""
 

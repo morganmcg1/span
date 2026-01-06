@@ -36,6 +36,7 @@ class SpanTelegramBot:
         self.bot = Bot(token=config.telegram_bot_token)
         self.dp = Dispatcher()
         self.llm = ClaudeClient(config.anthropic_api_key, config.claude_model)
+        self._llm_lock = asyncio.Lock()
         self.scheduler = CurriculumScheduler(db)
         self.memory_extractor = MemoryExtractor(db, config.anthropic_api_key)
         self._message_count: dict[int, int] = {}  # user_id -> message count
@@ -95,7 +96,7 @@ class SpanTelegramBot:
             await message.answer(f"📚 *{len(items)} items to review:*", parse_mode="Markdown")
 
             for item in items:
-                text = f"**{item.spanish}**\n_{item.english}_"
+                text = f"*{item.spanish}*\n_{item.english}_"
                 if item.example_sentence:
                     text += f"\n\nExample: {item.example_sentence}"
                 if item.mexican_notes:
@@ -126,7 +127,7 @@ class SpanTelegramBot:
                 # Create progress entry for this item
                 self.db.get_or_create_progress(user.id, item.id)
 
-                text = f"**{item.spanish}** = {item.english}"
+                text = f"*{item.spanish}* = {item.english}"
                 if item.example_sentence:
                     text += f"\n\n📝 {item.example_sentence}"
                 if item.mexican_notes:
@@ -260,7 +261,7 @@ class SpanTelegramBot:
             # Build compact list for easy phone scrolling
             text = "📖 *Your Vocabulary*\n\n"
             for item in items:
-                text += f"• **{item.spanish}** — {item.english}\n"
+                text += f"• *{item.spanish}* — {item.english}\n"
 
             text += f"\n_{len(items)} words_ • /review for practice"
 
@@ -332,7 +333,8 @@ class SpanTelegramBot:
                 if learner_context:
                     system = f"{system}\n\n## About This Learner\n{learner_context}"
 
-                chat_response = self.llm.chat_with_buttons(
+                chat_response = await self._call_llm(
+                    self.llm.chat_with_buttons,
                     messages=messages,
                     system=system,
                     max_tokens=300,
@@ -395,7 +397,8 @@ class SpanTelegramBot:
             if message.text.startswith(("t ", "T ")) and len(message.text) > 2:
                 text_to_translate = message.text[2:]
                 try:
-                    translation = self.llm.chat(
+                    translation = await self._call_llm(
+                        self.llm.chat,
                         messages=[LLMMessage(role="user", content=text_to_translate)],
                         system=(
                             "You are a translator. Translate the user's English text to natural Mexican Spanish. "
@@ -446,7 +449,8 @@ class SpanTelegramBot:
                 if learner_context:
                     system = f"{system}\n\n## About This Learner\n{learner_context}"
 
-                chat_response = self.llm.chat_with_buttons(
+                chat_response = await self._call_llm(
+                    self.llm.chat_with_buttons,
                     messages=messages,
                     system=system,
                     max_tokens=300,
@@ -618,6 +622,11 @@ class SpanTelegramBot:
             return f"🔧 *Voice glitch*\n\n`{error_snippet}`\n\nTry text instead?"
         else:
             return f"🔧 *Glitch in the matrix*\n\n`{error_snippet}`"
+
+    async def _call_llm(self, fn, /, *args, **kwargs):
+        """Call sync LLM functions without blocking the event loop."""
+        async with self._llm_lock:
+            return await asyncio.to_thread(fn, *args, **kwargs)
 
     # ==================== Claude Code Integration ====================
 
@@ -872,7 +881,7 @@ class SpanTelegramBot:
 
         text = "🌅 *Time to practice!*\n\n"
         for item in items[:5]:
-            text += f"• **{item.spanish}** = {item.english}\n"
+            text += f"• *{item.spanish}* = {item.english}\n"
 
         text += "\nReply with /review for more details!"
 

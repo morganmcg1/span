@@ -103,11 +103,12 @@ class ClaudeCodeRunner:
             "--output-format", "stream-json",
             "--verbose",
             "--model", "claude-opus-4-5-20251101",
+            "--dangerously-skip-permissions",
         ]
         if session_id:
             cmd.extend(["--resume", session_id])
 
-        display_cmd = ["claude", "-p", "<prompt>", "--output-format", "stream-json"]
+        display_cmd = ["claude", "-p", "<prompt>", "--output-format", "stream-json", "--dangerously-skip-permissions"]
         if "--verbose" in cmd:
             display_cmd.append("--verbose")
         if session_id:
@@ -166,14 +167,23 @@ class ClaudeCodeRunner:
                     stderr_str = stderr_buf.decode(errors="replace").strip()
                     if stderr_str:
                         stderr_str = stderr_str[-200:]
-                        error = f"Execution timed out after 5 minutes: {stderr_str}"
+                        error = f"Execution timed out after {EXECUTION_TIMEOUT} seconds: {stderr_str}"
                     else:
-                        error = "Execution timed out after 5 minutes"
+                        error = f"Execution timed out after {EXECUTION_TIMEOUT} seconds"
+
+                    # Return whatever we captured so far rather than dropping all output.
+                    # This keeps the Telegram UI useful and avoids flaky integration tests when
+                    # the CLI is slow or stuck after producing partial output.
+                    partial_output = "\n".join(output_lines).strip()
+                    if not partial_output:
+                        partial_output = error
+                    partial_full_output = "\n".join(full_text_blocks).strip() or partial_output
                     return CCExecutionResult(
                         success=False,
                         session_id=new_session_id,
-                        output="",
+                        output=partial_output,
                         error=error,
+                        full_output=partial_full_output,
                     )
                 except ValueError as e:
                     # Line too long even with increased limit - skip it

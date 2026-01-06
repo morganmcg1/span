@@ -124,64 +124,64 @@ class MemoryExtractor:
         if not messages:
             return ExtractionResult()
 
-        # Get current profile and skills
-        profile = self.db.get_or_create_learner_profile(user_id)
-        skills = self.db.get_or_create_skill_dimensions(user_id)
+        # Ensure we don't block the event loop on network I/O and avoid overlapping
+        # extraction jobs (which can double-charge and race on profile updates).
+        async with self._extraction_lock:
+            # Get current profile and skills
+            profile = self.db.get_or_create_learner_profile(user_id)
+            skills = self.db.get_or_create_skill_dimensions(user_id)
 
-        # Format conversation
-        conversation_text = "\n".join(
-            f"{msg['role'].title()}: {msg['content']}"
-            for msg in messages
-        )
-
-        # Format current skills for context
-        skills_text = "\n".join(
-            f"- {name}: {level} ({SkillLevel(level).name})"
-            for name, level in skills.to_dict().items()
-            if name not in ("id", "user_id", "updated_at", "created_at")
-        )
-
-        # Call Claude for extraction (use Sonnet for speed/cost)
-        try:
-            response = self.client.messages.create(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=700,
-                messages=[{
-                    "role": "user",
-                    "content": EXTRACTION_PROMPT.format(
-                        conversation=conversation_text,
-                        current_profile=profile.to_context_block(),
-                        current_skills=skills_text,
-                        skill_level_guide=SKILL_LEVEL_GUIDE,
-                    )
-                }],
+            # Format conversation
+            conversation_text = "\n".join(
+                f"{msg['role'].title()}: {msg['content']}"
+                for msg in messages
             )
 
-            # Parse response
-            response_text = response.content[0].text.strip()
+            # Format current skills for context
+            skills_text = "\n".join(
+                f"- {name}: {level} ({SkillLevel(level).name})"
+                for name, level in skills.to_dict().items()
+                if name not in ("id", "user_id", "updated_at", "created_at")
+            )
 
-            # Extract JSON from response (handle markdown code blocks)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
+            # Call Claude for extraction (use Sonnet for speed/cost)
+            try:
+                response = await asyncio.to_thread(
+                    self.client.messages.create,
+                    model="claude-sonnet-4-5-20250929",
+                    max_tokens=700,
+                    messages=[{
+                        "role": "user",
+                        "content": EXTRACTION_PROMPT.format(
+                            conversation=conversation_text,
+                            current_profile=profile.to_context_block(),
+                            current_skills=skills_text,
+                            skill_level_guide=SKILL_LEVEL_GUIDE,
+                        )
+                    }],
+                )
 
-            extracted = json.loads(response_text)
+                # Parse response
+                response_text = response.content[0].text.strip()
 
-        except (json.JSONDecodeError, IndexError, KeyError):
-            # Extraction failed, return empty result
-            return ExtractionResult()
+                # Extract JSON from response (handle markdown code blocks)
+                if "```json" in response_text:
+                    response_text = response_text.split("```json")[1].split("```")[0]
+                elif "```" in response_text:
+                    response_text = response_text.split("```")[1].split("```")[0]
 
-        if not extracted:
-            return ExtractionResult()
+                extracted = json.loads(response_text)
 
-        # Update profile with extracted facts
-        result = ExtractionResult()
-        profile_changed = False
+            except (json.JSONDecodeError, IndexError, KeyError):
+                # Extraction failed, return empty result
+                return ExtractionResult()
 
-        async with self._extraction_lock:
-            # Refresh profile in case it changed
-            profile = self.db.get_or_create_learner_profile(user_id)
+            if not extracted:
+                return ExtractionResult()
+
+            # Update profile with extracted facts
+            result = ExtractionResult()
+            profile_changed = False
 
             if extracted.get("name") and not profile.name:
                 profile.name = extracted["name"]

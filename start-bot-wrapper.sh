@@ -14,7 +14,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SPAN_DIR="${SPAN_DIR:-$SCRIPT_DIR}"
 
 # Paths
-SENTINEL="$SPAN_DIR/data/restart_sentinel"
+DATABASE_PATH="${DATABASE_PATH:-$SPAN_DIR/data/span.db}"
+SENTINEL="$(dirname "$DATABASE_PATH")/restart_sentinel"
 LOG="$SPAN_DIR/telegram.log"
 
 # Clean up any stale sentinel from previous runs
