@@ -2,17 +2,20 @@
 set -e
 
 SERVER="root@135.181.102.44"
-REMOTE_DIR="/root/span"
+REMOTE_DIR="/home/span/span"
+SPAN_USER="span"
 
 # Detect if we're already on the server
 if [[ "$(hostname)" == "span-server-ubuntu-4gb-hel1-3" ]]; then
     ON_SERVER=true
     run_cmd() { eval "$1"; }
     run_bg() { eval "$1"; }
+    run_as_span() { su - $SPAN_USER -c "$1"; }
 else
     ON_SERVER=false
     run_cmd() { ssh $SERVER "$1"; }
     run_bg() { ssh -f $SERVER "$1"; }
+    run_as_span() { ssh $SERVER "su - $SPAN_USER -c '$1'"; }
 fi
 
 echo "🚀 Deploying span to production..."
@@ -25,19 +28,19 @@ fi
 
 # 2. Pull and install any new deps
 echo "📥 Pulling latest..."
-run_cmd "cd $REMOTE_DIR && git pull && /root/.local/bin/uv sync"
+run_as_span "cd $REMOTE_DIR && git pull && /home/span/.local/bin/uv sync"
 
-# 3. Restart Telegram bot (using wrapper for Claude Code restart support)
+# 3. Restart Telegram bot (runs as span user, not root, for Claude Code permissions)
 echo "🤖 Restarting Telegram bot..."
 # Kill any existing bot/wrapper processes
 run_cmd "pkill -f 'span.telegram' || true; pkill -f 'start-bot-wrapper' || true"
 sleep 1
-# Start with wrapper for restart monitoring
-run_bg "nohup $REMOTE_DIR/start-bot-wrapper.sh > /dev/null 2>&1 &"
+# Start bot as span user (not root) so --dangerously-skip-permissions works
+run_as_span "cd $REMOTE_DIR && nohup /home/span/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
 
-# 4. Restart Voice server
+# 4. Restart Voice server (still runs as root for now)
 echo "🎤 Restarting Voice server..."
-run_bg "$REMOTE_DIR/start-voice.sh"
+run_bg "/root/span/start-voice.sh"
 
 # 5. Check services are running
 echo "⏳ Waiting for services to start..."
@@ -63,16 +66,16 @@ fi
 echo ""
 echo "📋 Recent logs:"
 echo "--- Telegram bot ---"
-run_cmd "tail -5 $REMOTE_DIR/telegram.log"
+run_as_span "tail -5 $REMOTE_DIR/telegram.log"
 echo ""
 echo "--- Voice server ---"
-run_cmd "tail -5 $REMOTE_DIR/voice.log"
+run_cmd "tail -5 /root/span/voice.log"
 
 echo ""
 echo "✅ Deploy complete!"
 echo ""
 echo "Commands:"
-echo "  Bot logs:    ssh $SERVER \"tail -f $REMOTE_DIR/telegram.log\""
-echo "  Voice logs:  ssh $SERVER \"tail -f $REMOTE_DIR/voice.log\""
-echo "  Stop all:    ssh $SERVER \"killall python3 uvicorn\""
+echo "  Bot logs:    ssh $SERVER \"su - span -c 'tail -f $REMOTE_DIR/telegram.log'\""
+echo "  Voice logs:  ssh $SERVER \"tail -f /root/span/voice.log\""
+echo "  Stop all:    ssh $SERVER \"pkill -f 'span.telegram'; pkill -f 'span.voice'\""
 echo "  Status:      ssh $SERVER \"pgrep -a -f 'span.(telegram|voice)'\""

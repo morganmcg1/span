@@ -12,8 +12,12 @@ set -e
 # If --remote flag, SSH into server and run this script there
 if [ "$1" = "--remote" ] || [ "$1" = "-r" ]; then
     SERVER_IP="${SPAN_SERVER_IP:-135.181.102.44}"
-    exec ssh "root@$SERVER_IP" "/root/span/scripts/health-check.sh"
+    exec ssh "root@$SERVER_IP" "/home/span/span/scripts/health-check.sh"
 fi
+
+# Paths (Telegram bot runs as span user, voice runs as root)
+TELEGRAM_LOG="/home/span/span/telegram.log"
+VOICE_LOG="/root/span/voice.log"
 
 echo "========================================="
 echo "  Span Health Check - $(date)"
@@ -52,16 +56,16 @@ fi
 
 echo ""
 echo "--- Recent Telegram Logs ---"
-if [ -f /root/span/telegram.log ]; then
-    tail -10 /root/span/telegram.log
+if [ -f "$TELEGRAM_LOG" ]; then
+    tail -10 "$TELEGRAM_LOG"
 else
     echo "(no log file found)"
 fi
 
 echo ""
 echo "--- Recent Voice Logs ---"
-if [ -f /root/span/voice.log ]; then
-    tail -10 /root/span/voice.log
+if [ -f "$VOICE_LOG" ]; then
+    tail -10 "$VOICE_LOG"
 else
     echo "(no log file found)"
 fi
@@ -69,8 +73,8 @@ fi
 echo ""
 echo "--- Check for Errors ---"
 echo -n "Telegram errors: "
-if [ -f /root/span/telegram.log ]; then
-    error_count=$(grep -ci "error\|exception\|traceback" /root/span/telegram.log 2>/dev/null | tail -1 || echo "0")
+if [ -f "$TELEGRAM_LOG" ]; then
+    error_count=$(grep -ci "error\|exception\|traceback" "$TELEGRAM_LOG" 2>/dev/null | tail -1 || echo "0")
     if [ "$error_count" -gt 0 ]; then
         echo -e "${YELLOW}$error_count found${NC}"
     else
@@ -81,8 +85,8 @@ else
 fi
 
 echo -n "Voice errors:    "
-if [ -f /root/span/voice.log ]; then
-    error_count=$(grep -ci "error\|exception\|traceback" /root/span/voice.log 2>/dev/null | tail -1 || echo "0")
+if [ -f "$VOICE_LOG" ]; then
+    error_count=$(grep -ci "error\|exception\|traceback" "$VOICE_LOG" 2>/dev/null | tail -1 || echo "0")
     if [ "$error_count" -gt 0 ]; then
         echo -e "${YELLOW}$error_count found${NC}"
     else
