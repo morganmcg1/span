@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# Don't use set -e because SSH backgrounding returns exit code 255 which is expected
 
 SERVER="root@135.181.102.44"
 REMOTE_DIR="/home/span/span"
@@ -36,7 +36,8 @@ echo "🤖 Restarting Telegram bot..."
 run_cmd "pkill -f 'span.telegram' || true; pkill -f 'start-bot-wrapper' || true"
 sleep 1
 # Start bot as span user (not root) so --dangerously-skip-permissions works
-run_as_span "cd $REMOTE_DIR && nohup /home/span/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 &"
+# Use bash -c with disown to properly detach from SSH session
+run_cmd "su - $SPAN_USER -c 'cd $REMOTE_DIR && nohup /home/span/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 & disown'"
 
 # 4. Restart Voice server (still runs as root for now)
 echo "🎤 Restarting Voice server..."
