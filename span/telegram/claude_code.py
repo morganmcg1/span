@@ -102,7 +102,7 @@ class ClaudeCodeRunner:
             "claude", "-p", full_prompt,
             "--output-format", "stream-json",
             "--verbose",
-            "--model", "claude-opus-4-5-20251101",
+            "--model", "claude-opus-4-5-20251101", "--dangerously-skip-permissions",
         ]
         if session_id:
             cmd.extend(["--resume", session_id])
