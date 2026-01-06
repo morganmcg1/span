@@ -35,9 +35,8 @@ echo "🤖 Restarting Telegram bot..."
 # Kill any existing bot/wrapper processes
 run_cmd "pkill -f 'span.telegram' || true; pkill -f 'start-bot-wrapper' || true"
 sleep 1
-# Start bot as span user (not root) so --dangerously-skip-permissions works
-# Use bash -c with disown to properly detach from SSH session
-run_cmd "su - $SPAN_USER -c 'cd $REMOTE_DIR && nohup /home/span/.local/bin/uv run python -m span.telegram > telegram.log 2>&1 & disown'"
+# Start bot as span user using helper script (ssh -f to background immediately)
+ssh -f $SERVER "su - $SPAN_USER -c '/home/span/start-bot.sh'" 2>/dev/null || true
 
 # 4. Restart Voice server (still runs as root for now)
 echo "🎤 Restarting Voice server..."
