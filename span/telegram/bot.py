@@ -210,6 +210,63 @@ class SpanTelegramBot:
                 parse_mode="Markdown",
             )
 
+        @self.dp.message(Command("reset"))
+        async def reset_handler(message: Message) -> None:
+            """Reset git working tree - discard uncommitted changes."""
+            # Only allow authorized user
+            if message.from_user.id != self.config.telegram_user_id:
+                await message.answer("Unauthorized: Only the bot owner can reset.")
+                return
+
+            repo_root = Path(__file__).parent.parent.parent
+
+            # Check current status
+            status_proc = await asyncio.create_subprocess_exec(
+                "git", "status", "--porcelain",
+                cwd=str(repo_root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            status_out, _ = await status_proc.communicate()
+            status_lines = status_out.decode().strip()
+
+            if not status_lines:
+                await message.answer("✅ Working tree is already clean.")
+                return
+
+            # Show what will be discarded
+            changes = status_lines.split("\n")[:10]  # Limit to 10 lines
+            preview = "\n".join(f"• `{line}`" for line in changes)
+            if len(status_lines.split("\n")) > 10:
+                preview += f"\n_...and {len(status_lines.split(chr(10))) - 10} more_"
+
+            # Discard changes
+            reset_proc = await asyncio.create_subprocess_exec(
+                "git", "checkout", "--", ".",
+                cwd=str(repo_root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await reset_proc.wait()
+
+            clean_proc = await asyncio.create_subprocess_exec(
+                "git", "clean", "-fd",
+                cwd=str(repo_root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await clean_proc.wait()
+
+            # Clear any CC session state
+            self._cc_session = None
+            self._cc_runner = None
+
+            await message.answer(
+                f"🗑️ *Working tree reset*\n\nDiscarded:\n{preview}\n\n"
+                "You can now start a fresh `cc` session.",
+                parse_mode="Markdown",
+            )
+
         @self.dp.message(Command("health"))
         async def health_handler(message: Message) -> None:
             """Check health of all services."""

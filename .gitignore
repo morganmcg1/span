@@ -211,3 +211,6 @@ __marimo__/
 
 # Span app data
 data/
+
+# Claude Code local settings (created per-machine, not tracked)
+.claude/settings.local.json
