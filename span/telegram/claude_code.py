@@ -66,6 +66,9 @@ class ClaudeCodeRunner:
                 "You are making live, on-the-fly updates to the `span` repo, "
                 "a Mexican Spanish language learning app with voice calls and Telegram bot. "
                 "Make the requested changes. The user will review and decide whether to deploy.\n\n"
+                "If the user asks you to push/deploy/restart, you can do so directly by following "
+                "the 'Self-Restart' instructions in CLAUDE.md (commit, push, write restart_pending.json "
+                "with chat_id 7459836597, touch data/restart_sentinel). The bot will auto-restart.\n\n"
                 "User request: "
             )
             full_prompt = context_prefix + prompt
