@@ -12,5 +12,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Start wrapper with nohup in background (the wrapper itself loops forever)
 cd "$SCRIPT_DIR"
-nohup ./start-bot-wrapper.sh > telegram.log 2>&1 &
+nohup ./start-bot-wrapper.sh >> telegram.log 2>&1 &
 echo "Bot wrapper started with PID $!"
