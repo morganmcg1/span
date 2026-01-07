@@ -634,6 +634,40 @@ ssh -f root@135.181.102.44 "/root/span/start-bot.sh"
 
 GitHub PAT is embedded in the git remote URL on the server (already configured).
 
+### Self-Restart (for Claude Code via Telegram)
+
+When running as Claude Code via Telegram (the `cc <prompt>` command), you can trigger a push & restart directly without needing the user to click buttons.
+
+**To push changes and restart the bot:**
+
+```bash
+# 1. Commit and push changes
+git add -A
+git commit -m "Your commit message"
+git push
+
+# 2. Write restart notification (so user knows it worked)
+cat > data/restart_pending.json << 'EOF'
+{"chat_id": <TELEGRAM_CHAT_ID>, "summary": "Brief description of changes"}
+EOF
+
+# 3. Touch sentinel to trigger restart
+touch data/restart_sentinel
+
+# 4. Tell the user what's happening
+echo "Changes pushed. Bot will restart momentarily and send confirmation."
+```
+
+**How it works:**
+- The bot runs inside `start-bot-wrapper.sh` which monitors `data/restart_sentinel`
+- When sentinel appears, wrapper kills the bot, runs `uv sync`, and restarts
+- On startup, the bot checks `data/restart_pending.json` and sends confirmation to the chat
+
+**Important:**
+- The chat_id is available in the Telegram context (usually `7459836597` for the main user)
+- Changes are already on the server's disk (Claude Code runs on server), the push is for GitHub backup
+- After touching sentinel, the bot process will be killed - any remaining output won't be seen
+
 ### Health Check
 
 Run the health check script to verify all services are running:
