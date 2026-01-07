@@ -30,7 +30,9 @@ while true; do
     cd "$SPAN_DIR"
 
     # Find uv binary (different locations on server vs local)
-    if [ -x "/root/.local/bin/uv" ]; then
+    if [ -x "/home/span/.local/bin/uv" ]; then
+        UV_BIN="/home/span/.local/bin/uv"
+    elif [ -x "/root/.local/bin/uv" ]; then
         UV_BIN="/root/.local/bin/uv"
     elif command -v uv &> /dev/null; then
         UV_BIN="uv"
@@ -77,6 +79,10 @@ while true; do
         EXIT_CODE=$?
     fi
     echo "[$(date)] Bot exited with code $EXIT_CODE" >> "$LOG"
+
+    # Sync dependencies before restart (in case Claude Code changed pyproject.toml)
+    echo "[$(date)] Syncing dependencies..." >> "$LOG"
+    $UV_BIN sync >> "$LOG" 2>&1 || echo "[$(date)] WARNING: uv sync failed, continuing anyway" >> "$LOG"
 
     # Brief pause before restart
     echo "[$(date)] Restarting in 2 seconds..." >> "$LOG"
