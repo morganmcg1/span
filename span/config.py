@@ -1,5 +1,8 @@
 """Configuration management for Span."""
 
+# This module centralizes all environment variable loading and configuration
+# for the Span application, including API keys, server settings, and database paths.
+
 from dataclasses import dataclass
 import os
 from pathlib import Path
