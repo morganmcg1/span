@@ -355,8 +355,8 @@ class TestRegisterTools:
             mock_llm = MagicMock()
             register_tools(mock_llm, memory_db, user_id=1, config=config)
 
-            # Should have registered 4 functions
-            assert mock_llm.register_function.call_count == 4
+            # Should have registered 5 functions
+            assert mock_llm.register_function.call_count == 5
 
             registered_names = [
                 call[0][0] for call in mock_llm.register_function.call_args_list
@@ -365,6 +365,7 @@ class TestRegisterTools:
             assert "get_hint" in registered_names
             assert "get_curriculum_advice" in registered_names
             assert "end_lesson_summary" in registered_names
+            assert "get_news" in registered_names
 
 
 class TestRecordPracticeIntegration:
