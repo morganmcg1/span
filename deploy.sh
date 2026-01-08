@@ -42,8 +42,8 @@ run_or_die "su - $SPAN_USER -c 'cd $REMOTE_DIR && git pull && /home/span/.local/
 
 # 3. Restart Telegram bot (runs as span user, not root, for Claude Code permissions)
 echo "🤖 Restarting Telegram bot..."
-# Kill any existing bot/wrapper processes
-run_cmd "pkill -f 'span.telegram' || true; pkill -f 'start-bot-wrapper' || true"
+# Kill any existing bot/wrapper processes (avoid matching this shell)
+run_cmd "pkill -f '[s]pan.telegram' || true; pkill -f '[s]tart-bot-wrapper' || true"
 sleep 1
 # Start bot as span user using helper script (wrapper backgrounds itself)
 run_as_span "$REMOTE_DIR/start-bot.sh"
