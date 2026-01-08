@@ -374,10 +374,15 @@ async def _get_or_create_persistent_room(session: aiohttp.ClientSession) -> tupl
 
 
 def _build_start_url(room_url: str) -> str | None:
-    """Build the voice-start landing page URL if public URL is configured."""
-    if not config.voice_server_public_url:
-        return None
-    return f"{config.voice_server_public_url}/voice-start?{urlencode({'room': room_url})}"
+    """Build the voice start URL.
+
+    Previously we had a landing page that requested mic permissions before
+    redirecting to Daily. However, that page required HTTPS to use getUserMedia(),
+    and our server is HTTP. Daily's own room pages are HTTPS and handle mic
+    permissions correctly, so we now just return the room URL directly.
+    """
+    # Return None to use room_url directly - Daily handles permissions properly
+    return None
 
 
 @app.get("/voice-start")
