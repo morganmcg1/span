@@ -23,6 +23,8 @@ rm -f "$SENTINEL"
 
 echo "[$(date)] Bot wrapper starting in $SPAN_DIR" >> "$LOG"
 
+FAIL_COUNT=0
+
 while true; do
     echo "[$(date)] Starting Telegram bot..." >> "$LOG"
 
@@ -48,10 +50,12 @@ while true; do
     echo "[$(date)] Bot started with PID $BOT_PID" >> "$LOG"
 
     # Monitor both the process and the sentinel file
+    REQUESTED_RESTART=0
     while kill -0 $BOT_PID 2>/dev/null; do
         if [ -f "$SENTINEL" ]; then
             echo "[$(date)] Restart requested via sentinel" >> "$LOG"
             rm -f "$SENTINEL"
+            REQUESTED_RESTART=1
 
             # Gracefully stop the bot
             kill $BOT_PID 2>/dev/null || true
@@ -78,13 +82,27 @@ while true; do
     else
         EXIT_CODE=$?
     fi
+    if [ "$REQUESTED_RESTART" -eq 1 ]; then
+        EXIT_CODE=0
+    fi
     echo "[$(date)] Bot exited with code $EXIT_CODE" >> "$LOG"
 
     # Sync dependencies before restart (in case Claude Code changed pyproject.toml)
     echo "[$(date)] Syncing dependencies..." >> "$LOG"
     $UV_BIN sync >> "$LOG" 2>&1 || echo "[$(date)] WARNING: uv sync failed, continuing anyway" >> "$LOG"
 
+    # Backoff on repeated crashes
+    if [ "$EXIT_CODE" -ne 0 ]; then
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+    else
+        FAIL_COUNT=0
+    fi
+    SLEEP_SEC=$((2 + FAIL_COUNT * 2))
+    if [ "$SLEEP_SEC" -gt 60 ]; then
+        SLEEP_SEC=60
+    fi
+
     # Brief pause before restart
-    echo "[$(date)] Restarting in 2 seconds..." >> "$LOG"
-    sleep 2
+    echo "[$(date)] Restarting in ${SLEEP_SEC}s..." >> "$LOG"
+    sleep "$SLEEP_SEC"
 done

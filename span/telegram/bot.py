@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import secrets
 import tempfile
 import time
 from pathlib import Path
@@ -44,6 +45,7 @@ class SpanTelegramBot:
         self._cc_session: dict | None = None  # {session_id, chat_id, changes}
         self._cc_runner: ClaudeCodeRunner | None = None
         self._cc_in_progress = False
+        self._ai_value_map: dict[str, str] = {}
         self._register_handlers()
 
     def _register_handlers(self) -> None:
@@ -151,7 +153,10 @@ class SpanTelegramBot:
 
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(voice_server_url) as resp:
+                    async with session.get(
+                        voice_server_url,
+                        headers=self._voice_headers(),
+                    ) as resp:
                         if resp.status != 200:
                             await message.answer(
                                 "Could not start voice room. Is the voice server running?\n"
@@ -248,7 +253,13 @@ class SpanTelegramBot:
             await reset_proc.wait()
 
             clean_proc = await asyncio.create_subprocess_exec(
-                "git", "clean", "-fd",
+                "git",
+                "clean",
+                "-fd",
+                "-e",
+                "data",
+                "-e",
+                "data/**",
                 cwd=str(repo_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -353,7 +364,11 @@ class SpanTelegramBot:
         @self.dp.callback_query(F.data.startswith("ai_"))
         async def ai_button_callback(callback: CallbackQuery) -> None:
             """Handle AI-generated button presses by sending the value as a message."""
-            value = callback.data.replace("ai_", "")
+            token = callback.data.replace("ai_", "")
+            value = self._ai_value_map.pop(token, None)
+            if not value:
+                await callback.answer("This option expired. Please ask again.", show_alert=True)
+                return
             await callback.answer()  # Dismiss the loading state
 
             # Show what was selected
@@ -404,7 +419,7 @@ class SpanTelegramBot:
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text=btn.label,
-                            callback_data=f"ai_{btn.value[:50]}",
+                            callback_data=f"ai_{self._store_ai_value(btn.value)}",
                         )]
                         for btn in chat_response.buttons[:4]
                     ])
@@ -530,7 +545,7 @@ class SpanTelegramBot:
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(
                             text=btn.label,
-                            callback_data=f"ai_{btn.value[:50]}",  # Prefix to distinguish from menu buttons
+                            callback_data=f"ai_{self._store_ai_value(btn.value)}",
                         )]
                         for btn in chat_response.buttons[:4]  # Max 4 buttons
                     ])
@@ -677,6 +692,20 @@ class SpanTelegramBot:
             return f"🔧 *Voice glitch*\n\n`{error_snippet}`\n\nTry text instead?"
         else:
             return f"🔧 *Glitch in the matrix*\n\n`{error_snippet}`"
+
+    def _store_ai_value(self, value: str) -> str:
+        """Store AI button values behind a short token."""
+        token = secrets.token_urlsafe(8)
+        self._ai_value_map[token] = value
+        if len(self._ai_value_map) > 1000:
+            self._ai_value_map.clear()
+        return token
+
+    def _voice_headers(self) -> dict[str, str]:
+        """Build auth headers for the voice server, if configured."""
+        if not self.config.voice_server_auth_token:
+            return {}
+        return {"X-Span-Token": self.config.voice_server_auth_token}
 
     async def _call_llm(self, fn, /, *args, **kwargs):
         """Call sync LLM functions without blocking the event loop."""

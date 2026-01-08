@@ -245,6 +245,21 @@ class Database:
                 )
             return None
 
+    def get_first_user(self) -> User | None:
+        """Get the first user in the database, if any."""
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM users ORDER BY id LIMIT 1").fetchone()
+            if row:
+                return User(
+                    id=row["id"],
+                    phone_number=row["phone_number"],
+                    telegram_id=row["telegram_id"],
+                    timezone=row["timezone"],
+                    preferred_call_times=row["preferred_call_times"],
+                    created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+                )
+            return None
+
     # Curriculum operations
     def add_curriculum_item(self, item: CurriculumItem) -> int:
         """Add a curriculum item and return its ID."""

@@ -52,6 +52,7 @@ class TestConfigDefaults:
         assert config.telegram_bot_token == ""
         assert config.voice_server_host == "0.0.0.0"
         assert config.voice_server_port == 7860
+        assert config.voice_server_auth_token == ""
         assert config.database_path == "data/span.db"
         assert config.timezone == "Europe/Dublin"
 
@@ -72,6 +73,7 @@ class TestConfigFromEnv:
             "TELEGRAM_BOT_TOKEN": "bot-token",
             "VOICE_SERVER_HOST": "127.0.0.1",
             "VOICE_SERVER_PORT": "8000",
+            "VOICE_SERVER_AUTH_TOKEN": "voice-token",
             "DATABASE_PATH": "/tmp/test.db",
             "TIMEZONE": "America/Mexico_City",
         }
@@ -88,6 +90,7 @@ class TestConfigFromEnv:
         assert config.telegram_bot_token == "bot-token"
         assert config.voice_server_host == "127.0.0.1"
         assert config.voice_server_port == 8000
+        assert config.voice_server_auth_token == "voice-token"
         assert config.database_path == "/tmp/test.db"
         assert config.timezone == "America/Mexico_City"
 

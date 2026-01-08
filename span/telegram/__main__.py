@@ -82,8 +82,11 @@ async def send_daily_voice_reminder(
     voice_server_url = f"http://localhost:{config.voice_server_port}/web"
 
     try:
+        headers = {}
+        if config.voice_server_auth_token:
+            headers["X-Span-Token"] = config.voice_server_auth_token
         async with aiohttp.ClientSession() as session:
-            async with session.get(voice_server_url) as resp:
+            async with session.get(voice_server_url, headers=headers) as resp:
                 if resp.status != 200:
                     console.print("[yellow]Voice server not available for daily reminder[/yellow]")
                     await bot.send_message(

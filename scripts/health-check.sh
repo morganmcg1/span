@@ -15,9 +15,10 @@ if [ "$1" = "--remote" ] || [ "$1" = "-r" ]; then
     exec ssh "root@$SERVER_IP" "/home/span/span/scripts/health-check.sh"
 fi
 
-# Paths (Telegram bot runs as span user, voice runs as root)
-TELEGRAM_LOG="/home/span/span/telegram.log"
-VOICE_LOG="/root/span/voice.log"
+# Paths (allow override via SPAN_DIR)
+SPAN_DIR="${SPAN_DIR:-/home/span/span}"
+TELEGRAM_LOG="$SPAN_DIR/telegram.log"
+VOICE_LOG="$SPAN_DIR/voice.log"
 
 echo "========================================="
 echo "  Span Health Check - $(date)"

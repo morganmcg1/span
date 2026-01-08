@@ -435,9 +435,15 @@ class ClaudeCodeRunner:
         )
         await reset_proc.wait()
 
-        # Remove untracked files/directories (respects .gitignore)
+        # Remove untracked files/directories, but protect runtime data.
         clean_proc = await asyncio.create_subprocess_exec(
-            "git", "clean", "-fd",
+            "git",
+            "clean",
+            "-fd",
+            "-e",
+            "data",
+            "-e",
+            "data/**",
             cwd=self.working_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

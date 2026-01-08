@@ -22,16 +22,15 @@ class TestGetUserAndLessonPlan:
         assert isinstance(is_news_lesson, bool)
 
     def test_returns_default_user_when_no_user(self, memory_db):
-        """Should return default user ID, None plan, and is_news_lesson flag when no user."""
+        """Should return None when no user exists."""
         result_id, result_plan, is_news_lesson = _get_user_and_lesson_plan(memory_db)
 
-        # DEFAULT_USER_ID is 1
-        assert result_id == 1
+        assert result_id is None
         assert result_plan is None
         assert isinstance(is_news_lesson, bool)
 
     def test_logs_warning_when_no_user(self, memory_db, capsys):
-        """Should print warning when falling back to default user."""
+        """Should print warning when no users exist."""
         with patch("span.voice.server.console") as mock_console:
             _get_user_and_lesson_plan(memory_db)
             # Check that a warning was printed
@@ -77,6 +76,7 @@ class TestDialoutEndpoint:
         # Create config without daily_api_key
         mock_config = MagicMock()
         mock_config.daily_api_key = None
+        mock_config.voice_server_auth_token = ""
 
         orig_config = server_module.config
         orig_db = server_module.db
@@ -103,6 +103,7 @@ class TestDialoutEndpoint:
         mock_config = MagicMock()
         mock_config.daily_api_key = "test-key"
         mock_config.user_phone_number = None
+        mock_config.voice_server_auth_token = ""
 
         orig_config = server_module.config
         orig_db = server_module.db
@@ -131,6 +132,7 @@ class TestWebEndpoint:
 
         mock_config = MagicMock()
         mock_config.daily_api_key = None
+        mock_config.voice_server_auth_token = ""
 
         orig_config = server_module.config
         orig_db = server_module.db

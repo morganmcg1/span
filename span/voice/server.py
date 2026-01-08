@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -162,12 +162,28 @@ def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None, bool]:
     if user:
         return user.id, scheduler.create_daily_plan(user.id), is_news_lesson
 
-    # Fallback to default user ID
+    # Fallback: pick any existing user if default doesn't exist
+    user = db.get_first_user()
+    if user:
+        console.print(
+            f"[yellow]Warning: default user_id={DEFAULT_USER_ID} not found. "
+            f"Using user_id={user.id} instead.[/yellow]"
+        )
+        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson
+
     console.print(
-        f"[yellow]Warning: No user found in database, using default user_id={DEFAULT_USER_ID}. "
-        f"Create a user first via Telegram /start command.[/yellow]"
+        "[yellow]Warning: No users found in database. Create a user first via Telegram /start.[/yellow]"
     )
-    return DEFAULT_USER_ID, None, is_news_lesson
+    return None, None, is_news_lesson
+
+
+def _require_auth(request: Request) -> None:
+    """Enforce shared-token auth when configured."""
+    if not config or not config.voice_server_auth_token:
+        return
+    token = request.headers.get("X-Span-Token") or request.query_params.get("token")
+    if token != config.voice_server_auth_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @asynccontextmanager
@@ -197,6 +213,7 @@ async def daily_dialin_webhook(request: Request):
     Handle incoming Daily PSTN dial-in calls.
     Daily calls this webhook when someone calls your phone number.
     """
+    _require_auth(request)
     data = await request.json()
     console.print(f"[blue]Incoming call: {data}[/blue]")
 
@@ -205,6 +222,8 @@ async def daily_dialin_webhook(request: Request):
 
     # Get user and lesson plan
     user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+    if not user_id:
+        return {"error": "No users found. Create a user first via Telegram /start."}
 
     # Create bot with database for tool calling
     bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
@@ -241,8 +260,9 @@ async def daily_dialin_webhook(request: Request):
 
 
 @app.api_route("/dialout", methods=["GET", "POST"])
-async def trigger_dialout():
+async def trigger_dialout(request: Request):
     """API endpoint to initiate an outbound call."""
+    _require_auth(request)
     if not config.daily_api_key:
         return {"error": "DAILY_API_KEY not configured"}
 
@@ -295,6 +315,8 @@ async def trigger_dialout():
 
         # Get user and lesson plan
         user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+        if not user_id:
+            return {"error": "No users found. Create a user first via Telegram /start."}
 
         # Create bot and transport with database for tool calling
         bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
@@ -405,7 +427,7 @@ async def voice_start_page(room: str):
 
 
 @app.api_route("/web", methods=["GET", "POST"])
-async def start_web_session():
+async def start_web_session(request: Request):
     """Start a browser-based voice session.
 
     Returns room URL - open it in your browser to talk to the bot.
@@ -413,6 +435,7 @@ async def start_web_session():
     """
     global _active_bot_tasks
 
+    _require_auth(request)
     if not config.daily_api_key:
         return {"error": "DAILY_API_KEY not configured"}
 
@@ -458,6 +481,8 @@ async def start_web_session():
 
         # Get user and lesson plan
         user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+        if not user_id:
+            return {"error": "No users found. Create a user first via Telegram /start."}
         if is_news_lesson:
             console.print("[blue]This session will be a news-based lesson[/blue]")
 

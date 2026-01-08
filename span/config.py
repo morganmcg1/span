@@ -43,6 +43,7 @@ class Config:
     voice_server_host: str = "0.0.0.0"
     voice_server_port: int = 7860
     voice_server_public_url: str = ""  # e.g., http://135.181.102.44:7860 for production
+    voice_server_auth_token: str = ""
 
     # Database
     database_path: str = "data/span.db"
@@ -78,6 +79,7 @@ class Config:
             voice_server_host=os.environ.get("VOICE_SERVER_HOST", "0.0.0.0"),
             voice_server_port=cls._safe_int(os.environ.get("VOICE_SERVER_PORT", "7860"), 7860),
             voice_server_public_url=os.environ.get("VOICE_SERVER_PUBLIC_URL", ""),
+            voice_server_auth_token=os.environ.get("VOICE_SERVER_AUTH_TOKEN", ""),
             database_path=os.environ.get("DATABASE_PATH", "data/span.db"),
             timezone=os.environ.get("TIMEZONE", "Europe/Dublin"),
         )
