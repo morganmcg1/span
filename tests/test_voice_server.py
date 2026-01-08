@@ -12,21 +12,23 @@ class TestGetUserAndLessonPlan:
     """Tests for _get_user_and_lesson_plan helper function."""
 
     def test_returns_user_and_plan_when_user_exists(self, memory_db, sample_user):
-        """Should return user ID and lesson plan when user exists."""
+        """Should return user ID, lesson plan, and is_news_lesson flag when user exists."""
         user_id = memory_db.create_user(sample_user)
 
-        result_id, result_plan = _get_user_and_lesson_plan(memory_db)
+        result_id, result_plan, is_news_lesson = _get_user_and_lesson_plan(memory_db)
 
         assert result_id == user_id
         assert result_plan is not None
+        assert isinstance(is_news_lesson, bool)
 
     def test_returns_default_user_when_no_user(self, memory_db):
-        """Should return default user ID and None plan when no user."""
-        result_id, result_plan = _get_user_and_lesson_plan(memory_db)
+        """Should return default user ID, None plan, and is_news_lesson flag when no user."""
+        result_id, result_plan, is_news_lesson = _get_user_and_lesson_plan(memory_db)
 
         # DEFAULT_USER_ID is 1
         assert result_id == 1
         assert result_plan is None
+        assert isinstance(is_news_lesson, bool)
 
     def test_logs_warning_when_no_user(self, memory_db, capsys):
         """Should print warning when falling back to default user."""

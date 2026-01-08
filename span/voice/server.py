@@ -2,6 +2,7 @@
 
 import asyncio
 import aiohttp
+import random
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlencode
@@ -142,24 +143,31 @@ LANDING_PAGE_HTML = """<!DOCTYPE html>
 """
 
 
-def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None]:
-    """Get user ID and lesson plan, falling back to default user if needed.
+# Probability of a news-based lesson (roughly 1 in 3 sessions)
+NEWS_LESSON_PROBABILITY = 0.33
+
+
+def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None, bool]:
+    """Get user ID, lesson plan, and whether this is a news lesson.
 
     Returns:
-        Tuple of (user_id, lesson_plan)
+        Tuple of (user_id, lesson_plan, is_news_lesson)
     """
     scheduler = CurriculumScheduler(db)
     user = db.get_user(DEFAULT_USER_ID)
 
+    # Determine if this should be a news-based lesson (~33% of sessions)
+    is_news_lesson = random.random() < NEWS_LESSON_PROBABILITY
+
     if user:
-        return user.id, scheduler.create_daily_plan(user.id)
+        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson
 
     # Fallback to default user ID
     console.print(
         f"[yellow]Warning: No user found in database, using default user_id={DEFAULT_USER_ID}. "
         f"Create a user first via Telegram /start command.[/yellow]"
     )
-    return DEFAULT_USER_ID, None
+    return DEFAULT_USER_ID, None, is_news_lesson
 
 
 @asynccontextmanager
@@ -196,10 +204,10 @@ async def daily_dialin_webhook(request: Request):
     dialin_settings = data.get("dialin_settings", {})
 
     # Get user and lesson plan
-    user_id, lesson_plan = _get_user_and_lesson_plan(db)
+    user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
 
     # Create bot with database for tool calling
-    bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id)
+    bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
 
     # For dial-in, Daily provides room_url and token
     room_url = data.get("room_url")
@@ -286,10 +294,10 @@ async def trigger_dialout():
                 token = token_data["token"]
 
         # Get user and lesson plan
-        user_id, lesson_plan = _get_user_and_lesson_plan(db)
+        user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
 
         # Create bot and transport with database for tool calling
-        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id)
+        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
         transport = bot.create_transport(room_url, token)
 
         # Start dial-out in background
@@ -449,10 +457,12 @@ async def start_web_session():
                 token = token_data["token"]
 
         # Get user and lesson plan
-        user_id, lesson_plan = _get_user_and_lesson_plan(db)
+        user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+        if is_news_lesson:
+            console.print("[blue]This session will be a news-based lesson[/blue]")
 
         # Create bot
-        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id)
+        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
         transport = bot.create_transport(room_url, token)
 
         # Run bot in background

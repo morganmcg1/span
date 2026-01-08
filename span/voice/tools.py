@@ -92,6 +92,12 @@ CURRICULUM_TOOLS = ToolsSchema(
             },
             required=["words_practiced", "overall_performance"],
         ),
+        FunctionSchema(
+            name="get_news",
+            description="Search for a current news story to discuss with the student. Use this at the START of a news-based lesson only. Returns a summary and vocabulary/grammar to focus on. Do NOT use this during regular conversation - only when explicitly doing a news lesson.",
+            properties={},
+            required=[],
+        ),
     ]
 )
 
@@ -117,10 +123,11 @@ class CurriculumToolHandlers:
     Tracks both SM-2 spaced repetition and skill dimension updates.
     """
 
-    def __init__(self, db: Database, user_id: int, config: Config):
+    def __init__(self, db: Database, user_id: int, config: Config, is_news_lesson: bool = False):
         self.db = db
         self.user_id = user_id
         self.config = config
+        self.is_news_lesson = is_news_lesson
         self.anthropic = Anthropic(api_key=config.anthropic_api_key)
         self.session_start = datetime.now()
         self.practice_records: list[dict] = []
@@ -347,6 +354,34 @@ class CurriculumToolHandlers:
             "words_practiced": words_practiced,
         })
 
+    async def get_news(self, params) -> None:
+        """Fetch a news story for discussion using web search."""
+        from span.voice.news import fetch_news_story
+
+        try:
+            story = await fetch_news_story(self.config.openai_api_key)
+            await params.result_callback({
+                "status": "success",
+                "headline": story.headline,
+                "summary_for_student": story.summary_for_student,
+                "summary_for_teacher": story.summary_for_teacher,
+                "source": story.source,
+                "vocab": [
+                    {"spanish": v.spanish, "english": v.english, "note": v.usage_note}
+                    for v in story.vocab_items
+                ],
+                "grammar": [
+                    {"structure": g.structure, "example": g.example, "explanation": g.explanation}
+                    for g in story.grammar_points
+                ],
+                "questions": story.discussion_questions,
+            })
+        except Exception as e:
+            await params.result_callback({
+                "status": "error",
+                "message": f"Failed to fetch news: {e}",
+            })
+
     async def end_lesson_summary(self, params) -> None:
         """End lesson and save session summary with skill progression."""
         args = params.arguments
@@ -373,10 +408,11 @@ class CurriculumToolHandlers:
             notes = f"{notes}\nSkills improved: {skill_progress}".strip()
 
         # Create session record
+        topic = "news_discussion" if self.is_news_lesson else "practice"
         session = LessonSession(
             user_id=self.user_id,
             lesson_type=LessonType.VOICE_CONVERSATION,
-            topic="practice",
+            topic=topic,
             items_covered=json.dumps(words_practiced),
             performance_score=score,
             duration_seconds=duration_seconds,
@@ -401,13 +437,16 @@ class CurriculumToolHandlers:
         })
 
 
-def register_tools(llm, db: Database, user_id: int, config: Config) -> CurriculumToolHandlers:
+def register_tools(
+    llm, db: Database, user_id: int, config: Config, is_news_lesson: bool = False
+) -> CurriculumToolHandlers:
     """Register curriculum tools with the LLM service."""
-    handlers = CurriculumToolHandlers(db, user_id, config)
+    handlers = CurriculumToolHandlers(db, user_id, config, is_news_lesson=is_news_lesson)
 
     llm.register_function("record_practice", handlers.record_practice)
     llm.register_function("get_hint", handlers.get_hint)
     llm.register_function("get_curriculum_advice", handlers.get_curriculum_advice)
     llm.register_function("end_lesson_summary", handlers.end_lesson_summary)
+    llm.register_function("get_news", handlers.get_news)
 
     return handlers

@@ -143,3 +143,41 @@ class TestSpanishTutorBotInit:
         with patch("span.voice.bot.MemoryExtractor") as mock_extractor:
             bot = SpanishTutorBot(config, db=memory_db, user_id=user_id)
             mock_extractor.assert_called_once()
+
+    def test_init_stores_is_news_lesson_flag(self, config):
+        """Should store is_news_lesson flag."""
+        bot = SpanishTutorBot(config, is_news_lesson=True)
+        assert bot.is_news_lesson is True
+
+        bot2 = SpanishTutorBot(config, is_news_lesson=False)
+        assert bot2.is_news_lesson is False
+
+
+class TestNewsLessonPrompt:
+    """Tests for news lesson prompt injection."""
+
+    def test_news_lesson_instructions_included_when_flag_true(
+        self, memory_db, sample_user, config
+    ):
+        """System prompt should include news lesson instructions when is_news_lesson=True."""
+        user_id = memory_db.create_user(sample_user)
+
+        bot = SpanishTutorBot(config, db=memory_db, user_id=user_id, is_news_lesson=True)
+        prompt = bot.build_system_prompt()
+
+        # Verify news lesson instructions are present
+        assert "News Discussion" in prompt
+        assert "get_news" in prompt
+        assert "summary_for_student" in prompt
+
+    def test_news_lesson_instructions_excluded_when_flag_false(
+        self, memory_db, sample_user, config
+    ):
+        """System prompt should NOT include news lesson instructions when is_news_lesson=False."""
+        user_id = memory_db.create_user(sample_user)
+
+        bot = SpanishTutorBot(config, db=memory_db, user_id=user_id, is_news_lesson=False)
+        prompt = bot.build_system_prompt()
+
+        # Verify news lesson instructions are NOT present
+        assert "News Discussion" not in prompt

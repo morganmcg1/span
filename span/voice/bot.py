@@ -18,7 +18,7 @@ from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from span.config import Config, CONVERSATION_HISTORY_LIMIT, EXTRACTION_INTERVAL
 from span.curriculum.scheduler import DailyPlan
 from span.db.database import Database
-from span.llm.prompts import VOICE_TUTOR_SYSTEM_PROMPT
+from span.llm.prompts import NEWS_LESSON_INSTRUCTIONS, VOICE_TUTOR_SYSTEM_PROMPT
 from span.memory.extractor import MemoryExtractor
 from span.voice.tools import CURRICULUM_TOOLS, register_tools
 
@@ -93,11 +93,13 @@ class SpanishTutorBot:
         lesson_plan: DailyPlan | None = None,
         db: Database | None = None,
         user_id: int = 1,
+        is_news_lesson: bool = False,
     ):
         self.config = config
         self.lesson_plan = lesson_plan
         self.db = db
         self.user_id = user_id
+        self.is_news_lesson = is_news_lesson
         self._llm = None
         self._tool_handlers = None
         self.memory_extractor = None
@@ -148,6 +150,10 @@ Use skill_observations parameter to report specific skill demonstrations you obs
 """
             base_prompt = f"{base_prompt}\n{skill_context}"
 
+        # Add news lesson instructions if this is a news-based session
+        if self.is_news_lesson:
+            base_prompt = f"{base_prompt}\n{NEWS_LESSON_INSTRUCTIONS}"
+
         return base_prompt
 
     def create_llm_service(self) -> OpenAIRealtimeLLMService:
@@ -173,7 +179,7 @@ Use skill_observations parameter to report specific skill demonstrations you obs
         # Register tool handlers if database is available
         if self.db:
             self._tool_handlers = register_tools(
-                self._llm, self.db, self.user_id, self.config
+                self._llm, self.db, self.user_id, self.config, self.is_news_lesson
             )
 
         return self._llm
