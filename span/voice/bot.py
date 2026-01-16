@@ -18,7 +18,7 @@ from pipecat.transports.daily.transport import DailyParams, DailyTransport
 from span.config import Config, CONVERSATION_HISTORY_LIMIT, EXTRACTION_INTERVAL
 from span.curriculum.scheduler import DailyPlan
 from span.db.database import Database
-from span.llm.prompts import NEWS_LESSON_INSTRUCTIONS, VOICE_TUTOR_SYSTEM_PROMPT
+from span.llm.prompts import NEWS_LESSON_INSTRUCTIONS, RECALL_LESSON_INSTRUCTIONS, VOICE_TUTOR_SYSTEM_PROMPT
 from span.memory.extractor import MemoryExtractor
 from span.voice.tools import CURRICULUM_TOOLS, register_tools
 
@@ -94,12 +94,14 @@ class SpanishTutorBot:
         db: Database | None = None,
         user_id: int = 1,
         is_news_lesson: bool = False,
+        is_recall_lesson: bool = False,
     ):
         self.config = config
         self.lesson_plan = lesson_plan
         self.db = db
         self.user_id = user_id
         self.is_news_lesson = is_news_lesson
+        self.is_recall_lesson = is_recall_lesson
         self._llm = None
         self._tool_handlers = None
         self.memory_extractor = None
@@ -150,8 +152,10 @@ Use skill_observations parameter to report specific skill demonstrations you obs
 """
             base_prompt = f"{base_prompt}\n{skill_context}"
 
-        # Add news lesson instructions if this is a news-based session
-        if self.is_news_lesson:
+        # Add special lesson instructions based on lesson type
+        if self.is_recall_lesson:
+            base_prompt = f"{base_prompt}\n{RECALL_LESSON_INSTRUCTIONS}"
+        elif self.is_news_lesson:
             base_prompt = f"{base_prompt}\n{NEWS_LESSON_INSTRUCTIONS}"
 
         return base_prompt

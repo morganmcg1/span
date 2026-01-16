@@ -143,24 +143,37 @@ LANDING_PAGE_HTML = """<!DOCTYPE html>
 """
 
 
-# Probability of a news-based lesson (roughly 1 in 3 sessions)
+# Probability of special lessons
+# Recall lessons: ~33% of sessions (every ~3 sessions on average)
+# News lessons: ~33% of remaining sessions (~22% overall)
+# Regular lessons: ~44% overall
+RECALL_LESSON_PROBABILITY = 0.33
 NEWS_LESSON_PROBABILITY = 0.33
 
 
-def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None, bool]:
-    """Get user ID, lesson plan, and whether this is a news lesson.
+def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None, bool, bool]:
+    """Get user ID, lesson plan, and lesson type flags.
 
     Returns:
-        Tuple of (user_id, lesson_plan, is_news_lesson)
+        Tuple of (user_id, lesson_plan, is_news_lesson, is_recall_lesson)
     """
     scheduler = CurriculumScheduler(db)
     user = db.get_user(DEFAULT_USER_ID)
 
-    # Determine if this should be a news-based lesson (~33% of sessions)
-    is_news_lesson = random.random() < NEWS_LESSON_PROBABILITY
+    # Determine lesson type (~33% recall, ~22% news, ~44% regular)
+    roll = random.random()
+    if roll < RECALL_LESSON_PROBABILITY:
+        is_recall_lesson = True
+        is_news_lesson = False
+    elif roll < RECALL_LESSON_PROBABILITY + NEWS_LESSON_PROBABILITY * (1 - RECALL_LESSON_PROBABILITY):
+        is_recall_lesson = False
+        is_news_lesson = True
+    else:
+        is_recall_lesson = False
+        is_news_lesson = False
 
     if user:
-        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson
+        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson, is_recall_lesson
 
     # Fallback: pick any existing user if default doesn't exist
     user = db.get_first_user()
@@ -169,12 +182,12 @@ def _get_user_and_lesson_plan(db: Database) -> tuple[int, object | None, bool]:
             f"[yellow]Warning: default user_id={DEFAULT_USER_ID} not found. "
             f"Using user_id={user.id} instead.[/yellow]"
         )
-        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson
+        return user.id, scheduler.create_daily_plan(user.id), is_news_lesson, is_recall_lesson
 
     console.print(
         "[yellow]Warning: No users found in database. Create a user first via Telegram /start.[/yellow]"
     )
-    return None, None, is_news_lesson
+    return None, None, is_news_lesson, is_recall_lesson
 
 
 def _require_auth(request: Request) -> None:
@@ -221,12 +234,15 @@ async def daily_dialin_webhook(request: Request):
     dialin_settings = data.get("dialin_settings", {})
 
     # Get user and lesson plan
-    user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+    user_id, lesson_plan, is_news_lesson, is_recall_lesson = _get_user_and_lesson_plan(db)
     if not user_id:
         return {"error": "No users found. Create a user first via Telegram /start."}
 
     # Create bot with database for tool calling
-    bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
+    bot = SpanishTutorBot(
+        config, lesson_plan, db=db, user_id=user_id,
+        is_news_lesson=is_news_lesson, is_recall_lesson=is_recall_lesson
+    )
 
     # For dial-in, Daily provides room_url and token
     room_url = data.get("room_url")
@@ -314,12 +330,15 @@ async def trigger_dialout(request: Request):
                 token = token_data["token"]
 
         # Get user and lesson plan
-        user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+        user_id, lesson_plan, is_news_lesson, is_recall_lesson = _get_user_and_lesson_plan(db)
         if not user_id:
             return {"error": "No users found. Create a user first via Telegram /start."}
 
         # Create bot and transport with database for tool calling
-        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
+        bot = SpanishTutorBot(
+            config, lesson_plan, db=db, user_id=user_id,
+            is_news_lesson=is_news_lesson, is_recall_lesson=is_recall_lesson
+        )
         transport = bot.create_transport(room_url, token)
 
         # Start dial-out in background
@@ -480,14 +499,19 @@ async def start_web_session(request: Request):
                 token = token_data["token"]
 
         # Get user and lesson plan
-        user_id, lesson_plan, is_news_lesson = _get_user_and_lesson_plan(db)
+        user_id, lesson_plan, is_news_lesson, is_recall_lesson = _get_user_and_lesson_plan(db)
         if not user_id:
             return {"error": "No users found. Create a user first via Telegram /start."}
-        if is_news_lesson:
+        if is_recall_lesson:
+            console.print("[magenta]This session will be a recall/review lesson[/magenta]")
+        elif is_news_lesson:
             console.print("[blue]This session will be a news-based lesson[/blue]")
 
         # Create bot
-        bot = SpanishTutorBot(config, lesson_plan, db=db, user_id=user_id, is_news_lesson=is_news_lesson)
+        bot = SpanishTutorBot(
+            config, lesson_plan, db=db, user_id=user_id,
+            is_news_lesson=is_news_lesson, is_recall_lesson=is_recall_lesson
+        )
         transport = bot.create_transport(room_url, token)
 
         # Run bot in background

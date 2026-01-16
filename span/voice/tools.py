@@ -24,11 +24,15 @@ CURRICULUM_TOOLS = ToolsSchema(
     standard_tools=[
         FunctionSchema(
             name="record_practice",
-            description="Record that the student practiced a vocabulary item. Call this after practicing each word to track their progress.",
+            description="Record that the student practiced a vocabulary item. Call this after practicing each word to track their progress. If the word is new (not in curriculum), it will be automatically added.",
             properties={
                 "spanish_word": {
                     "type": "string",
                     "description": "The Spanish word or phrase that was practiced",
+                },
+                "english_meaning": {
+                    "type": "string",
+                    "description": "English translation/meaning. Required for new words not already in curriculum.",
                 },
                 "quality": {
                     "type": "integer",
@@ -37,6 +41,10 @@ CURRICULUM_TOOLS = ToolsSchema(
                 "pronunciation_score": {
                     "type": "integer",
                     "description": "Pronunciation quality 1-5, or omit if not assessed",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Topic category (e.g., greetings, food, expressions, storytelling). Used when adding new words.",
                 },
                 "skill_observations": {
                     "type": "object",
@@ -95,6 +103,12 @@ CURRICULUM_TOOLS = ToolsSchema(
         FunctionSchema(
             name="get_news",
             description="Search for a current news story to discuss with the student. Use this at the START of a news-based lesson only. Returns a summary and vocabulary/grammar to focus on. Do NOT use this during regular conversation - only when explicitly doing a news lesson.",
+            properties={},
+            required=[],
+        ),
+        FunctionSchema(
+            name="get_recall",
+            description="Get personalized recall items for the student based on their learning history. Use this at the START of a recall-focused lesson only. Returns items to practice based on weak areas, recent learning, and items due for review.",
             properties={},
             required=[],
         ),
@@ -181,11 +195,16 @@ class CurriculumToolHandlers:
         return advanced_skills
 
     async def record_practice(self, params) -> None:
-        """Record vocabulary practice and update SM-2 progress + skill dimensions."""
+        """Record vocabulary practice and update SM-2 progress + skill dimensions.
+
+        Auto-creates curriculum items for new words encountered in conversation.
+        """
         args = params.arguments
         spanish_word = args.get("spanish_word", "").strip()
+        english_meaning = args.get("english_meaning", "").strip()
         quality = args.get("quality", 3)
         pronunciation_score = args.get("pronunciation_score")
+        topic = args.get("topic", "conversation").strip()
         skill_observations = args.get("skill_observations", {})
 
         # Validate inputs
@@ -199,14 +218,37 @@ class CurriculumToolHandlers:
         # Clamp quality to valid range 0-5
         quality = max(0, min(5, int(quality)))
 
-        # Look up the curriculum item
+        # Look up the curriculum item, or create it if new
         item = self.db.get_curriculum_item_by_spanish(spanish_word)
+        is_new_item = False
+
         if not item:
-            await params.result_callback({
-                "status": "not_found",
-                "message": f"Word '{spanish_word}' not in curriculum",
-            })
-            return
+            # Auto-create new curriculum item from conversation
+            if not english_meaning:
+                await params.result_callback({
+                    "status": "needs_translation",
+                    "message": f"Word '{spanish_word}' is new. Please provide english_meaning to add it to curriculum.",
+                })
+                return
+
+            from span.db.models import ContentType, CurriculumItem
+
+            new_item = CurriculumItem(
+                content_type=ContentType.VOCABULARY,
+                spanish=spanish_word,
+                english=english_meaning,
+                topic=topic,
+                difficulty=2,  # Default to intermediate
+                cefr_level="A2",
+                mexican_notes="Learned in conversation",
+                skill_contributions={
+                    "vocabulary_production": 3,
+                    "vocabulary_recognition": 3,
+                },
+            )
+            item_id = self.db.add_curriculum_item(new_item)
+            item = self.db.get_curriculum_item(item_id)
+            is_new_item = True
 
         # Get or create progress for this item
         progress = self.db.get_or_create_progress(self.user_id, item.id)
@@ -261,7 +303,10 @@ class CurriculumToolHandlers:
         })
 
         # Build response message
-        message = f"Progress saved. Next review in {sm2_result.interval_days} day(s)."
+        if is_new_item:
+            message = f"New word '{spanish_word}' added to curriculum! Next review in {sm2_result.interval_days} day(s)."
+        else:
+            message = f"Progress saved. Next review in {sm2_result.interval_days} day(s)."
         if advanced_skills:
             skill_names = ", ".join(advanced_skills.keys())
             message += f" Skills improved: {skill_names}!"
@@ -270,6 +315,7 @@ class CurriculumToolHandlers:
             "status": "recorded",
             "word": spanish_word,
             "quality": quality,
+            "is_new": is_new_item,
             "next_review_days": sm2_result.interval_days,
             "skills_advanced": advanced_skills,
             "message": message,
@@ -382,6 +428,22 @@ class CurriculumToolHandlers:
                 "message": f"Failed to fetch news: {e}",
             })
 
+    async def get_recall(self, params) -> None:
+        """Get personalized recall items based on learner history."""
+        from span.voice.recall import get_recall_items
+
+        try:
+            recall_data = get_recall_items(self.db, self.user_id)
+            await params.result_callback({
+                "status": "success",
+                **recall_data,
+            })
+        except Exception as e:
+            await params.result_callback({
+                "status": "error",
+                "message": f"Failed to get recall items: {e}",
+            })
+
     async def end_lesson_summary(self, params) -> None:
         """End lesson and save session summary with skill progression."""
         args = params.arguments
@@ -448,5 +510,6 @@ def register_tools(
     llm.register_function("get_curriculum_advice", handlers.get_curriculum_advice)
     llm.register_function("end_lesson_summary", handlers.end_lesson_summary)
     llm.register_function("get_news", handlers.get_news)
+    llm.register_function("get_recall", handlers.get_recall)
 
     return handlers

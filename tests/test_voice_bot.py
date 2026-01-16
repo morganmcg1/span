@@ -152,6 +152,14 @@ class TestSpanishTutorBotInit:
         bot2 = SpanishTutorBot(config, is_news_lesson=False)
         assert bot2.is_news_lesson is False
 
+    def test_init_stores_is_recall_lesson_flag(self, config):
+        """Should store is_recall_lesson flag."""
+        bot = SpanishTutorBot(config, is_recall_lesson=True)
+        assert bot.is_recall_lesson is True
+
+        bot2 = SpanishTutorBot(config, is_recall_lesson=False)
+        assert bot2.is_recall_lesson is False
+
 
 class TestNewsLessonPrompt:
     """Tests for news lesson prompt injection."""
@@ -180,4 +188,49 @@ class TestNewsLessonPrompt:
         prompt = bot.build_system_prompt()
 
         # Verify news lesson instructions are NOT present
+        assert "News Discussion" not in prompt
+
+
+class TestRecallLessonPrompt:
+    """Tests for recall lesson prompt injection."""
+
+    def test_recall_lesson_instructions_included_when_flag_true(
+        self, memory_db, sample_user, config
+    ):
+        """System prompt should include recall lesson instructions when is_recall_lesson=True."""
+        user_id = memory_db.create_user(sample_user)
+
+        bot = SpanishTutorBot(config, db=memory_db, user_id=user_id, is_recall_lesson=True)
+        prompt = bot.build_system_prompt()
+
+        # Verify recall lesson instructions are present
+        assert "Recall & Review" in prompt
+        assert "get_recall" in prompt
+
+    def test_recall_lesson_instructions_excluded_when_flag_false(
+        self, memory_db, sample_user, config
+    ):
+        """System prompt should NOT include recall lesson instructions when is_recall_lesson=False."""
+        user_id = memory_db.create_user(sample_user)
+
+        bot = SpanishTutorBot(config, db=memory_db, user_id=user_id, is_recall_lesson=False)
+        prompt = bot.build_system_prompt()
+
+        # Verify recall lesson instructions are NOT present
+        assert "Recall & Review" not in prompt
+
+    def test_recall_takes_precedence_over_news(
+        self, memory_db, sample_user, config
+    ):
+        """When both flags are set, recall should take precedence over news."""
+        user_id = memory_db.create_user(sample_user)
+
+        bot = SpanishTutorBot(
+            config, db=memory_db, user_id=user_id,
+            is_recall_lesson=True, is_news_lesson=True
+        )
+        prompt = bot.build_system_prompt()
+
+        # Recall instructions should be present, not news
+        assert "Recall & Review" in prompt
         assert "News Discussion" not in prompt
